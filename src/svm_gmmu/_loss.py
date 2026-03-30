@@ -241,12 +241,12 @@ def component_grad_b(y: float, d_mu: float, d_sigma: float) -> float:
     # -- Limiting case: zero uncertainty -> subgradient of hinge loss ----
     if d_sigma < _EPS:
         if d_mu > 0.0:
-            return -y * 2.0  # matches -y * (erf(+inf) + 1) = -y * 2
+            return -y  # matches -y * (erf(+inf) + 1) / 2 = -y * 1
         else:
             return 0.0
 
     ratio = d_mu / d_sigma
-    return -y * (erf(ratio) + 1.0)
+    return -y * (erf(ratio) + 1.0) / 2.0
 
 
 # ===================================================================
