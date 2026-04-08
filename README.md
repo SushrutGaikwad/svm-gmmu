@@ -168,3 +168,61 @@ model = SvmGmmu(lam=0.01, max_iter=1000)
 model.fit(X, y)  # no uncertainty -> standard SVM
 predictions = model.predict(X)
 ```
+
+## Visualization
+
+The `svm_gmmu.plotting` module provides three functions for visualizing 2-D datasets. Matplotlib is required (installed automatically with `uv sync`).
+
+```python
+from svm_gmmu.plotting import plot_uncertainty, plot_boundary, plot_boundary_comparison
+```
+
+### Plot uncertainty contours (data only)
+
+Visualize the per-sample GMM density contours before training any model. Each sample's uncertainty is shown as nested filled contours at the requested sigma levels, colored by class label, with the observed points overlaid.
+
+```python
+fig, ax = plot_uncertainty(X, y, sample_uncertainty)
+```
+
+Customize the sigma levels, figure size, or pass your own axes:
+
+```python
+fig, ax = plot_uncertainty(
+    X, y, sample_uncertainty,
+    sigmas=(1, 2, 3, 4),
+    figsize=(12, 12),
+    title="My Dataset",
+    random_state=42,
+)
+```
+
+### Plot a decision boundary
+
+After fitting a model, overlay its decision boundary ($\mathbf{w}^\intercal \mathbf{x} + b = 0$, solid line) and margin lines ($\pm 1$, dashed) on top of the uncertainty contours.
+
+```python
+model = SvmGmmu(lam=0.01, max_iter=5000, batch_size=1, random_state=42)
+model.fit(X, y, sample_uncertainty=sample_uncertainty)
+
+fig, ax = plot_boundary(X, y, sample_uncertainty, model)
+```
+
+### Compare SVM-GMMU vs. standard SVM
+
+Train both an uncertainty-aware model and a standard SVM, then plot them side by side to see how uncertainty shifts the decision boundary.
+
+```python
+model_gmmu = SvmGmmu(lam=0.01, max_iter=5000, batch_size=1, random_state=42)
+model_gmmu.fit(X, y, sample_uncertainty=sample_uncertainty)
+
+model_svm = SvmGmmu(lam=0.01, max_iter=5000, batch_size=1, random_state=42)
+model_svm.fit(X, y)  # no uncertainty -> standard SVM
+
+fig, (ax_left, ax_right) = plot_boundary_comparison(
+    X, y, sample_uncertainty,
+    model_gmmu, model_svm,
+)
+```
+
+All three functions accept a `random_state` parameter for reproducible sigma-level estimation and return the matplotlib `Figure` and `Axes` objects for further customization.
