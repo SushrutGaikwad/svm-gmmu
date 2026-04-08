@@ -3,13 +3,13 @@
 Every public function in this module corresponds to one or more equations
 from the paper.  The mapping is:
 
-    compute_d_mu        -> Eq. 13 / 25   (signed margin distance of mean)
-    compute_d_sigma     -> Eq. 14 / 26   (uncertainty spread along w)
-    component_loss      -> Eq. 15 / 28   (expected hinge loss, one Gaussian)
-    component_grad_w    -> per-component part of Eq. 18 / 31
-    component_grad_b    -> per-component part of Eq. 19 / 32
-    gmmu_objective      -> Eq. 30        (full objective)
-    gmmu_gradients      -> Eqs. 31-32    (full gradients for a mini-batch)
+    compute_d_mu        -> Eq. 21 / 44   (signed margin distance of mean)
+    compute_d_sigma     -> Eq. 22 / 45   (uncertainty spread along w)
+    component_loss      -> Eq. 23 / 46   (expected hinge loss, one Gaussian)
+    component_grad_w    -> per-component part of Eq. 35 / 49
+    component_grad_b    -> per-component part of Eq. 37 / 50
+    gmmu_objective      -> Eq. 48        (full objective)
+    gmmu_gradients      -> Eqs. 49-50    (full gradients for a mini-batch)
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def compute_d_mu(
 ) -> float:
     """Signed margin distance of a component mean.
 
-    Equation 13 (GSU) / 25 (GMMU):
+    Equation 21 (GSU) / 44 (GMMU):
         d_mu = 1 - y * (w^T mu + b)
 
     This is exactly the standard hinge-loss argument evaluated at the
@@ -72,7 +72,7 @@ def compute_d_sigma(
 ) -> float:
     """Uncertainty spread in the classification-relevant direction.
 
-    Equation 14 (GSU) / 26 (GMMU):
+    Equation 22 (GSU) / 45 (GMMU):
         d_sigma = sqrt(2 * w^T Sigma w)
 
     The quantity w^T Sigma w is the variance of the projection w^T x
@@ -108,13 +108,13 @@ def compute_d_sigma(
 def component_loss(d_mu: float, d_sigma: float) -> float:
     """Closed-form expected hinge loss for a single Gaussian component.
 
-    Equation 15 (GSU) / 28 (GMMU):
+    Equation 23 (GSU) / 46 (GMMU):
         L = (d_mu / 2) * [erf(d_mu / d_sigma) + 1]
             + (d_sigma / (2 sqrt(pi))) * exp(-(d_mu / d_sigma)^2)
 
     When d_sigma -> 0 (no uncertainty), this smoothly reduces to the
-    standard hinge loss max(0, d_mu), as shown in Section 3.6 of the
-    paper.
+    standard hinge loss max(0, d_mu), as shown in Section 9.7 of the
+    report.
 
     Parameters
     ----------
@@ -150,8 +150,8 @@ def component_grad_w(
 ) -> NDArray[np.floating]:
     """Gradient of one component's loss with respect to w.
 
-    This is the per-component piece inside the sum of Equation 18 (GSU) /
-    31 (GMMU), without the mixing weight or the 1/n factor:
+    This is the per-component piece inside the sum of Equation 35 (GSU) /
+    49 (GMMU), without the mixing weight or the 1/n factor:
 
         dL_i^(m)/dw = [exp(-r^2) / (sqrt(pi) * d_sigma)] * Sigma w
                       - (y / 2) * [erf(r) + 1] * mu
@@ -215,8 +215,8 @@ def component_grad_w(
 def component_grad_b(y: float, d_mu: float, d_sigma: float) -> float:
     """Gradient of one component's loss with respect to b.
 
-    This is the per-component piece inside the sum of Equation 19 (GSU) /
-    32 (GMMU), without the mixing weight or the 1/n factor:
+    This is the per-component piece inside the sum of Equation 37 (GSU) /
+    50 (GMMU), without the mixing weight or the 1/n factor:
 
         dL_i^(m)/db = -y * [erf(d_mu / d_sigma) + 1]
 
@@ -263,12 +263,12 @@ def gmmu_objective(
 ) -> float:
     """Full SVM-GMMU objective function.
 
-    Equation 30:
+    Equation 48:
         J(w, b) = (lam / 2) ||w||^2
                   + (1/n) sum_i sum_m pi_i^(m) L_i^(m)(w, b)
 
     where L_i^(m) is the closed-form expected hinge loss for the m-th
-    Gaussian component of the i-th sample (Equation 28).
+    Gaussian component of the i-th sample (Equation 46).
 
     Parameters
     ----------
@@ -316,7 +316,7 @@ def gmmu_gradients(
 ) -> tuple[NDArray[np.floating], float]:
     """Gradients of the SVM-GMMU objective for a mini-batch.
 
-    Equations 31-32:
+    Equations 49-50:
         dJ/dw = lam * w
                 + (1/|B|) sum_{i in B} sum_m pi_i^(m) dL_i^(m)/dw
 

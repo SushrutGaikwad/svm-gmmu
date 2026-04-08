@@ -3,15 +3,15 @@
 This module provides :class:`SvmGmmu`, a linear classifier that accounts
 for per-sample uncertainty modeled as Gaussian mixtures.  It follows the
 scikit-learn estimator API (``fit`` / ``predict`` / ``decision_function``)
-and uses the Pegasos-style SGD algorithm described in Section 3.7 of the
-paper.
+and uses the Pegasos-style SGD algorithm described in Sections 12 and 21
+of the report.
 
 Special cases
 -------------
 - When ``sample_uncertainty`` has one component per sample, the model is
   equivalent to SVM-GSU (Part III of the paper).
 - When ``sample_uncertainty`` is ``None`` (or all covariances are zero),
-  the model reduces to a standard linear SVM (Section 3.6).
+  the model reduces to a standard linear SVM (Section 9.7).
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ class SvmGmmu(BaseEstimator, ClassifierMixin):
         self.classes_ = np.array([-1.0, 1.0])
         self.loss_history_: list[float] = []
 
-        # -- Run Pegasos-style SGD (Section 3.7 of the paper) -----------
+        # -- Run Pegasos-style SGD (Sections 12 and 21 of the report) ---
         self.coef_, self.intercept_ = self._pegasos_sgd(X, y, sample_uncertainty)
 
         return self
@@ -222,7 +222,7 @@ class SvmGmmu(BaseEstimator, ClassifierMixin):
             Predicted labels in {+1, -1}.
         """
         scores = self.decision_function(X)
-        return np.sign(scores)
+        return np.where(scores >= 0, 1.0, -1.0)
 
     # ------------------------------------------------------------------ #
     #  Pegasos SGD (private)
@@ -236,13 +236,13 @@ class SvmGmmu(BaseEstimator, ClassifierMixin):
     ) -> tuple[NDArray[np.float64], float]:
         """Run the Pegasos-style SGD solver.
 
-        This implements the algorithm from Section 3.7 of the paper:
+        This implements the algorithm from Sections 12 and 21 of the report:
 
         1. Initialize w with ||w|| <= 1/sqrt(lam), b = 0.
         2. For t = 1, ..., T:
            a. Sample a mini-batch of indices.
            b. Set learning rate eta_t = 1 / (lam * t).
-           c. Compute gradients using Eqs. 31-32.
+           c. Compute gradients using Eqs. 49-50.
            d. Update w and b.
            e. Project w so that ||w|| <= 1/sqrt(lam).
 
@@ -284,7 +284,7 @@ class SvmGmmu(BaseEstimator, ClassifierMixin):
             # (b) Learning rate: eta_t = 1 / (lam * t)
             eta = 1.0 / (self.lam * t)
 
-            # (c) Compute gradients (Eqs. 31-32)
+            # (c) Compute gradients (Eqs. 49-50)
             grad_w, grad_b = gmmu_gradients(
                 w, b, sample_uncertainty, y, self.lam, batch_idx
             )
