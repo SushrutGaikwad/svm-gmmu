@@ -217,7 +217,7 @@ def _draw_contours(
         linewidths=0.8,
         alpha=0.6,
     )
-    fmt = {lvl[j]: f"{sigmas_rev[j]}\u03c3" for j in range(len(sigmas_rev))}
+    fmt = {lvl[j]: f"${sigmas_rev[j]}\\sigma$" for j in range(len(sigmas_rev))}
     ax.clabel(cs, inline=True, fontsize=7, fmt=fmt)
 
 
@@ -285,11 +285,11 @@ def _add_legend(
         handles.append(Line2D([0], [0], color="k", lw=2, label="Decision boundary"))
         handles.append(
             Line2D(
-                [0], [0], color="k", lw=1, ls="--", alpha=0.5, label="Margin (\u00b11)"
+                [0], [0], color="k", lw=1, ls="--", alpha=0.5, label=r"Margin ($\pm 1$)"
             )
         )
 
-    sigma_str = ", ".join(f"{s}\u03c3" for s in sorted(sigmas))
+    sigma_str = ", ".join(f"${s}\\sigma$" for s in sorted(sigmas))
     handles.append(
         Line2D([0], [0], color="gray", lw=0.8, label=f"Contours at {sigma_str}")
     )
