@@ -2,7 +2,15 @@
 
 SVM with Gaussian Mixture Uncertainty.
 
-A scikit-learn-compatible classifier that accounts for per-sample uncertainty modeled as Gaussian mixtures. Includes the single-Gaussian special case (SVM-GSU) from Tzelepis, Mezaris, and Patras (IEEE TPAMI, 2017) and extends it to mixtures of Gaussians (SVM-GMU).
+A scikit-learn-compatible classifier that accounts for per-sample uncertainty modeled as Gaussian mixtures. Includes the single-Gaussian special case (SVM-GSU) from Tzelepis et al. [[1]](#ref1) and extends it to mixtures of Gaussians (SVM-GMU).
+
+## Report
+
+You can read my detailed report [here](docs/reports/report_1/report.pdf).
+
+## Examples
+
+You can find examples of how to use the code in the [`examples`](examples/) directory.
 
 ## Installation
 
@@ -226,3 +234,8 @@ fig, (ax_left, ax_right) = plot_boundary_comparison(
 ```
 
 All three functions accept a `random_state` parameter for reproducible sigma-level estimation and return the matplotlib `Figure` and `Axes` objects for further customization.
+
+## References
+
+<a id="ref1"></a>
+[1] C. Tzelepis, V. Mezaris, and I. Patras, "Linear Maximum Margin Classifier for Learning from Uncertain Data," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, vol. 40, no. 12, pp. 2948–2262, 2017. [doi.org/10.1109/TPAMI.2017.2772235](https://doi.org/10.1109/TPAMI.2017.2772235)
