@@ -495,11 +495,11 @@ Substituting \cref{eq:dL_ddmu,eq:ddmu_dw,eq:dL_ddSigma,eq:ddSigma_dw}:
 \end{equation}
 Simplifying:
 \begin{equation}
-    \pdv{{\loss_{\text{GSU}}}_{i}(\vb{w}, b)}{\vb{w}} = \frac{\exp\!\left(-d_{\bmu_i}^2/d_{\bSigma_i}^2\right)}{\sqrt{\pi}\, d_{\bSigma_i}}\, \bSigma_i \vb{w} \;-\; \frac{y_i}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right) \bmu_i.
+    \pdv{{\loss_{\text{GSU}}}_{i}(\vb{w}, b)}{\vb{w}} = \frac{\exp\!\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right)}{\sqrt{\pi}\, d_{\bSigma_i}}\, \bSigma_i \vb{w} \;-\; \frac{y_i}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right) \bmu_i.
 \end{equation}
 The full gradient of the objective is therefore:
-\begin{equation}\label{eq:gsu_grad_w}
-    \boxed{\pdv{\obj_{\text{GSU}} (\vb{w}, b)}{\vb{w}} = \lambda \vb{w} + \frac{1}{n}\sum_{i=1}^{n}\left[\frac{\exp\!\left(-d_{\bmu_i}^2 / d_{\bSigma_i}^2\right)}{\sqrt{\pi}\, d_{\bSigma_i}}\, \bSigma_i \vb{w} \;-\; \frac{y_i}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right) \bmu_i\right].}
+\begin{equation}\label{eq:gsu_grad_w}% -d_{\bmu_i}^2 / d_{\bSigma_i}^2
+    \boxed{\pdv{\obj_{\text{GSU}} (\vb{w}, b)}{\vb{w}} = \lambda \vb{w} + \frac{1}{n}\sum_{i=1}^{n}\left[\frac{\exp\!\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right)}{\sqrt{\pi}\, d_{\bSigma_i}}\, \bSigma_i \vb{w} \;-\; \frac{y_i}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right) \bmu_i\right].}
 \end{equation}
 The two terms inside the sum have clear interpretations:
 \begin{enumerate}[leftmargin=2em]
