@@ -1,0 +1,1147 @@
+\documentclass[11pt, letterpaper]{article}
+
+% =====================================================================
+% PACKAGES
+% =====================================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{physics}
+\usepackage{upgreek}
+\usepackage{bm}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+\usepackage{cleveref}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{mathtools}
+\usepackage[most]{tcolorbox}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{nicefrac}
+\usepackage[backend=biber, style=authoryear, maxcitenames=1]{biblatex}
+\addbibresource{references.bib}
+
+% =====================================================================
+% tcolorbox style for "status" boxes
+% =====================================================================
+\newtcolorbox{statusbox}[1][]{%
+    colback=gray!5!white,
+    colframe=black!60!white,
+    fonttitle=\bfseries,
+    title={#1},
+    boxrule=0.8pt,
+    arc=2pt,
+    left=6pt, right=6pt, top=4pt, bottom=4pt
+}
+
+% =====================================================================
+% CUSTOM COMMANDS FOR NOTATION CONSISTENCY
+% =====================================================================
+\newcommand{\bSigma}{\vb{\Sigma}}
+\newcommand{\bsigma}{\boldsymbol{\upsigma}}
+\newcommand{\bpi}{\boldsymbol{\pi}}
+\newcommand{\bmu}{\boldsymbol{\upmu}}
+\newcommand{\blambda}{\boldsymbol{\uplambda}}
+\newcommand{\bLambda}{\vb{\Lambda}}
+\newcommand{\btheta}{\boldsymbol{\uptheta}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\setX}{\mathcal{X}}
+\newcommand{\loss}{\mathcal{L}}
+\newcommand{\obj}{\mathcal{J}}
+\newcommand{\Norm}{\mathcal{N}}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{remark}{Remark}[section]
+\newtheorem{definition}{Definition}[section]
+
+% =====================================================================
+% DOCUMENT
+% =====================================================================
+\begin{document}
+
+\title{\textbf{From SVMs to Uncertainty-Aware Classification:\\A Detailed Treatment of Gaussian and Gaussian Mixture Sample Uncertainty}}
+
+\author{Sushrut Gaikwad}
+\date{March 29, 2026}
+\maketitle
+
+\begin{abstract}
+These notes provide a self-contained, detailed exposition of the Support Vector Machine with Gaussian Sample Uncertainty (SVM-GSU), as proposed by \textcite{tzelepis2017linear}. We begin with the basics of the standard linear SVM and carefully build up to the SVM-GSU formulation, explaining every mathematical step in a way that is accessible to readers with an undergraduate-level background in linear algebra, calculus, and probability. We then develop a novel extension, SVM with Gaussian Mixture Uncertainty (SVM-GMU), which handles non-Gaussian uncertainties by modeling each training example's uncertainty as a mixture of Gaussians. This allows the classifier to handle complex, multimodal, and non-elliptical uncertainty shapes (e.g., banana-shaped contours) while preserving all the desirable properties of the original framework: closed-form loss, closed-form gradients, convexity, and efficient stochastic gradient descent optimization.
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+% =====================================================================
+% NOTATION TABLE
+% =====================================================================
+\section*{Notation}
+\addcontentsline{toc}{section}{Notation}
+
+Throughout this document, we use the following conventions:
+\begin{itemize}[leftmargin=2em]
+    \item $n$ denotes the number of training examples.
+    \item $d$ denotes the dimensionality of the feature space (i.e., the number of features per example).
+    \item Vectors are \textbf{lowercase, bold, non-italic}: $\vb{w}$, $\vb{x}$, $\vb{z}$.
+    \item Greek vectors are \textbf{bold upright}: $\bmu$, $\bsigma$, $\btheta$.
+    \item Matrices are \textbf{bold upright uppercase}: $\bSigma$, $\bLambda$.
+    \item Scalars are italic: $\lambda$, $b$, $d$, $n$.
+    \item In the standard SVM (Part~I), $\vb{x}_i$ denotes the fixed feature vector of the $i$-th example.
+    \item In SVM-GSU and SVM-GMU (Parts~III and~IV), $\bmu_i$ denotes the mean of the $i$-th example's uncertainty distribution, and $\vb{x}_i$ denotes a random vector drawn from that distribution: $\vb{x}_i \sim \Norm(\bmu_i, \bSigma_i)$.
+\end{itemize}
+
+\newpage
+
+% =====================================================================
+% PART I: BACKGROUND AND STANDARD SVM
+% =====================================================================
+\part{Background and the Standard Linear SVM}
+
+\section{What Is Classification?}
+
+Suppose you are a doctor trying to decide whether a tumor is malignant or benign based on some measurements (e.g., size, shape, texture). You have access to historical data, that is, past patients for whom the diagnosis is known. Each patient's measurements form a \emph{data point}, and the diagnosis (malignant or benign) is the \emph{label}. The goal of \emph{classification} is to learn a rule from this historical data that can predict the label of a new, unseen patient.
+
+More formally, we have a \emph{training set} of $n$ examples:
+\begin{equation}
+    \setX = \left\{ \left(\vb{x}_i,\, y_i\right) :\; \vb{x}_i \in \R^d,\; y_i \in \{+1, -1\},\; i = 1, \ldots, n \right\},
+\end{equation}
+where:
+\begin{itemize}[leftmargin=2em]
+    \item $\vb{x}_i \in \R^d$ is the \emph{feature vector} of the $i$-th example. It is a $d$-dimensional column vector. Each entry represents some measured quantity (a ``feature''). For example, if $d = 3$, then $\vb{x}_i = \begin{bmatrix} x_{i,1} & x_{i,2} & x_{i,3} \end{bmatrix}^{\intercal}$ might contain the tumor's diameter, perimeter, and average intensity.
+    \item $y_i \in \{+1, -1\}$ is the \emph{class label}. We use $+1$ for one class (say, malignant) and $-1$ for the other (benign).
+\end{itemize}
+The classifier's job is to find a function that, given a new $\vb{x}$, predicts whether $y = +1$ or $y = -1$.
+
+\section{The Idea of a Linear Classifier}
+
+The simplest classifier is a \emph{linear classifier}. In two dimensions, this is just a straight line that separates the two classes. In three dimensions, it is a plane. In $d$ dimensions, it is a \emph{hyperplane}. A hyperplane in $\R^d$ is defined by a weight vector $\vb{w} \in \R^d$ and a bias (or intercept) $b \in \R$:
+\begin{equation}
+    H : \quad \vb{w}^{\intercal} \vb{x} + b = 0.
+\end{equation}
+Let us unpack this notation:
+\begin{itemize}[leftmargin=2em]
+    \item $\vb{w}^{\intercal} \vb{x}$ is the \emph{dot product} (or inner product) of $\vb{w}$ and $\vb{x}$:
+    \begin{equation}
+        \vb{w}^{\intercal} \vb{x} = \sum_{j=1}^{d} w_j\, x_j = w_1 x_1 + w_2 x_2 + \cdots + w_d x_d.
+    \end{equation}
+    This gives a single real number that measures how much $\vb{x}$ ``aligns'' with $\vb{w}$.
+    \item $b$ shifts the hyperplane. Without $b$, the hyperplane would always pass through the origin.
+\end{itemize}
+The hyperplane $H$ divides $\R^d$ into two \emph{halfspaces}:
+\begin{align}
+    \text{Positive side:} &\quad \vb{w}^{\intercal} \vb{x} + b > 0, \\
+    \text{Negative side:} &\quad \vb{w}^{\intercal} \vb{x} + b < 0.
+\end{align}
+A linear classifier predicts the label of a new point $\vb{x}_t$ as:
+\begin{equation}
+    \hat{y}_t = \mathrm{sign}\!\left(\vb{w}^{\intercal} \vb{x}_t + b\right),
+\end{equation}
+where ``$\mathrm{sign}(\cdot)$'' is the sign function: it returns $+1$ if the argument is positive and $-1$ if negative.
+
+\section{The Margin: Why Not Just Any Separating Line?}
+
+If the data is \emph{linearly separable} (i.e., a hyperplane exists that perfectly separates the two classes), there are infinitely many such hyperplanes. Which one should we choose? Intuitively, we want the hyperplane that is as far as possible from the nearest data points of both classes. This ``buffer zone'' is called the \emph{margin}. A larger margin means the classifier is more robust: small perturbations in the data are less likely to cause misclassification.
+
+\subsection{Deriving the Distance from a Point to a Hyperplane}
+
+Let us derive the distance formula from scratch. Consider a hyperplane $H: \vb{w}^{\intercal}\vb{x} + b = 0$ and a point $\vb{x}_0 \in \R^d$. The signed distance from $\vb{x}_0$ to $H$ is the length of the shortest vector from $\vb{x}_0$ to any point on $H$.
+
+Let $\vb{x}_H$ be the point on $H$ closest to $\vb{x}_0$. The vector $\vb{x}_0 - \vb{x}_H$ must be perpendicular to $H$. Since $\vb{w}$ is the normal vector to $H$, we have $\vb{x}_0 - \vb{x}_H = t \vb{w}$ for some scalar $t \in \R$. Thus $\vb{x}_H = \vb{x}_0 - t\vb{w}$. Since $\vb{x}_H$ lies on $H$, we have $\vb{w}^{\intercal}\vb{x}_H + b = 0$. Substituting:
+\begin{equation}
+    \vb{w}^{\intercal}(\vb{x}_0 - t\vb{w}) + b = 0 \implies \vb{w}^{\intercal}\vb{x}_0 + b - t\|\vb{w}\|^2 = 0 \implies t = \frac{\vb{w}^{\intercal}\vb{x}_0 + b}{\|\vb{w}\|^2}.
+\end{equation}
+The distance is $\|\vb{x}_0 - \vb{x}_H\| = |t| \cdot \|\vb{w}\|$:
+\begin{equation}
+    \text{distance}(\vb{x}_0, H) = \frac{|\vb{w}^{\intercal}\vb{x}_0 + b|}{\|\vb{w}\|},
+\end{equation}
+where $\|\vb{w}\| = \sqrt{\vb{w}^{\intercal}\vb{w}} = \sqrt{\sum_j w_j^2}$ is the Euclidean norm (length) of $\vb{w}$. The Support Vector Machine (SVM) is the classifier that \emph{maximizes} this margin.
+
+\section{The SVM Optimization Problem}\label{sec:svm_opt}
+
+In practice, data may not be perfectly separable. The standard \emph{soft-margin SVM} allows some misclassifications but penalizes them. The optimization problem is:
+\begin{equation}\label{eq:svm_objective}
+    \min_{\vb{w},\, b}\quad \obj_{\text{SVM}}(\vb{w}, b) = \underbrace{\frac{\lambda}{2}\|\vb{w}\|^2}_{\text{regularization}} + \underbrace{\frac{1}{n}\sum_{i=1}^{n} \max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x}_i + b\right)\right)}_{\text{average hinge loss over training set}}.
+\end{equation}
+Let us understand each term.
+
+\subsection{The Regularization Term: $\frac{\lambda}{2}\|\vb{w}\|^2$}
+
+This is the \emph{regularization} term. Here $\lambda > 0$ is a user-chosen parameter that controls how much we care about keeping $\|\vb{w}\|$ small (equivalently, keeping the margin large, since the geometric margin equals $1/\|\vb{w}\|$). A larger $\lambda$ means we prioritize a wider margin even if it means more misclassifications.
+
+\subsection{The Hinge Loss: $\max(0,\; 1 - y_i(\vb{w}^{\intercal} \vb{x}_i + b))$}
+
+This is the \emph{hinge loss}, often written as $h(t) = \max(0, 1 - t)$ where $t = y_i(\vb{w}^{\intercal} \vb{x}_i + b)$. The quantity $t_i = y_i(\vb{w}^{\intercal} \vb{x}_i + b)$ is called the \emph{functional margin} of point $i$. Let us see what happens:
+\begin{itemize}[leftmargin=2em]
+    \item \textbf{Correctly classified and far from boundary} ($t_i \geq 1$): The hinge loss is zero. The point contributes no penalty. These are the ``easy'' points.
+    \item \textbf{Correctly classified but close to boundary} ($0 < t_i < 1$): The hinge loss is $1 - t_i > 0$. The point is correctly classified but falls within the margin. It is penalized mildly.
+    \item \textbf{Misclassified} ($t_i < 0$): The hinge loss is $1 - t_i > 1$. The point is on the wrong side of the boundary and is penalized heavily. The further away it is on the wrong side, the larger the penalty.
+\end{itemize}
+The SVM objective \cref{eq:svm_objective} balances two competing goals:
+\begin{enumerate}[leftmargin=2em]
+    \item \textbf{Wide margin} (small $\|\vb{w}\|$): Controlled by the regularization term.
+    \item \textbf{Few misclassifications} (small hinge loss): Controlled by the data-fitting term.
+\end{enumerate}
+The parameter $\lambda$ trades off between these two goals.
+
+\subsection{A Note on Convexity}
+
+The SVM objective \cref{eq:svm_objective} is a \emph{convex function}. This is a crucial property. A function is convex if, roughly speaking, it is ``bowl-shaped'', that is, it has no local minima other than the global minimum. This means:
+\begin{itemize}[leftmargin=2em]
+    \item Any local minimum is also the global minimum.
+    \item We can find the optimal $\vb{w}$ and $b$ efficiently using gradient-based optimization.
+\end{itemize}
+Convexity follows because $\|\vb{w}\|^2$ is convex, $\max(0, 1-t)$ is convex in $t$ (it is piecewise linear), and $t = y_i(\vb{w}^{\intercal} \vb{x}_i + b)$ is linear in $(\vb{w}, b)$. A sum of convex functions is convex.
+
+
+% =====================================================================
+% PART II: THE PROBLEM OF UNCERTAINTY
+% =====================================================================
+\part{The Problem: What If Our Data Is Uncertain?}
+
+\section{Why Data Uncertainty Matters}
+
+In the standard SVM formulation above, each training example $\vb{x}_i$ is treated as a \emph{fixed, known point} in $\R^d$. But in practice, this is often not realistic:
+\begin{enumerate}[leftmargin=2em]
+    \item \textbf{Measurement noise:} Every measurement instrument has some imprecision. The true value is not exactly $\vb{x}_i$ but something ``close to'' $\vb{x}_i$, with some uncertainty.
+    \item \textbf{Feature extraction artifacts:} In computer vision, natural language processing, or audio processing, the features are computed via complex pipelines. The extracted features are noisy approximations of the underlying signal.
+    \item \textbf{Aggregated data:} Sometimes $\vb{x}_i$ is the \emph{average} of many measurements. For example, in a medical dataset, the reported value might be the average of multiple cell measurements, and the standard deviation is also available.
+    \item \textbf{Data augmentation modeling:} An image can be shifted, rotated, or scaled by small amounts. The set of images produced by these transforms can be modeled as a distribution centered at the original image.
+\end{enumerate}
+In all these cases, we know (or can estimate) not just a single point $\vb{x}_i$, but a \emph{probability distribution} around $\vb{x}_i$ that describes where the ``true'' data point might lie.
+
+\section{Why the Standard SVM Fails to Use This Information}
+
+The standard SVM takes only the point $\vb{x}_i$ (typically the mean) and ignores any associated uncertainty. Consider two scenarios:
+\begin{itemize}[leftmargin=2em]
+    \item \textbf{Scenario A:} A data point $\vb{x}_i$ lies very close to the decision boundary, but we are very certain about its position (tiny uncertainty).
+    \item \textbf{Scenario B:} The same point $\vb{x}_i$ lies close to the boundary, but we are very \emph{uncertain} about its position (large uncertainty that extends across the boundary).
+\end{itemize}
+The standard SVM treats these two scenarios identically. But clearly, in Scenario B, there is a significant probability that the true data point actually lies on the wrong side of the boundary. A good classifier should account for this.
+
+
+% =====================================================================
+% PART III: SVM-GSU (GAUSSIAN SAMPLE UNCERTAINTY)
+% =====================================================================
+\part{SVM with Gaussian Sample Uncertainty (SVM-GSU)}
+
+This part presents the method proposed by \textcite{tzelepis2017linear}. Each training example is modeled not as a fixed point, but as a Gaussian distribution.
+
+\medskip
+\begin{statusbox}[Roadmap for Part III]
+We will proceed in five steps:
+\begin{enumerate}[leftmargin=1.5em, topsep=2pt, itemsep=1pt]
+    \item \textbf{Define} the new training set, replacing fixed points with Gaussians (\cref{sec:gsu_training_set}).
+    \item \textbf{Write down} the objective function containing an integral we cannot yet evaluate (\cref{sec:expected_hinge}).
+    \item \textbf{Evaluate} that integral in closed form using a key theorem (\cref{sec:loss_closed_form}).
+    \item \textbf{Substitute} the result back to obtain the full, explicit objective function.
+    \item \textbf{Differentiate} the objective to get closed-form gradients for optimization (\cref{sec:gsu_gradients}).
+\end{enumerate}
+At each stage, we will display the objective function so that you always see the bigger picture.
+\end{statusbox}
+
+\section{The New Training Set}\label{sec:gsu_training_set}
+
+In the standard SVM, the $i$-th training example was a fixed vector $\vb{x}_i$. Now, we make a conceptual shift: what was previously a fixed point is now replaced by a \emph{probability distribution} describing where the true data point might lie. Specifically, we model each training example as a Gaussian distribution with a known mean and covariance.
+
+To make this shift clear in our notation, we use $\bmu_i$ to denote the \emph{mean} (center) of the $i$-th example's distribution, and $\vb{x}_i$ to denote a \emph{random vector} drawn from that distribution. The training set becomes:
+\begin{equation}\label{eq:gsu_training_set}
+    \setX' = \left\{ \left(\bmu_i,\, \bSigma_i,\, y_i\right) :\; \bmu_i \in \R^d,\; \bSigma_i \in \mathbb{S}^d_{++},\; y_i \in \{+1, -1\},\; i = 1, \ldots, n \right\},
+\end{equation}
+where:
+\begin{itemize}[leftmargin=2em]
+    \item $\bmu_i \in \R^d$ is the \emph{mean vector} of the $i$-th example. This is the ``center'' of the uncertainty distribution, that is, the best estimate of where the data point lies.
+    \item $\bSigma_i \in \mathbb{S}^d_{++}$ is the \emph{covariance matrix} of the $i$-th example. It is a $d \times d$ symmetric positive definite matrix that describes the shape and extent of the uncertainty. Here, $\mathbb{S}^d_{++}$ denotes the set of all $d \times d$ symmetric positive definite matrices.
+    \item $y_i \in \{+1, -1\}$ is the class label, as before.
+\end{itemize}
+We then define a random vector $\vb{x}_i$ for each training example, and assume it follows a multivariate Gaussian (normal) distribution:
+\begin{equation}\label{eq:gsu_rv}
+    \vb{x}_i \sim \Norm\!\left(\bmu_i,\, \bSigma_i\right).
+\end{equation}
+This notation reads naturally: ``the $i$-th data point $\vb{x}_i$ is drawn from a Gaussian with mean $\bmu_i$ and covariance $\bSigma_i$.'' The mean $\bmu_i$ plays the role that the fixed point $\vb{x}_i$ played in the standard SVM, but now we also have the covariance $\bSigma_i$ encoding the uncertainty around it.
+
+\subsection{What Is a Multivariate Gaussian Distribution?}
+
+For readers who may be less familiar, let us briefly review this concept. A random vector $\vb{x} \in \R^d$ follows a multivariate Gaussian distribution with mean $\bmu$ and covariance $\bSigma$ if its probability density function (PDF) is:
+\begin{equation}\label{eq:gaussian_pdf}
+    f_{\vb{x}}(\vb{x}) = \frac{1}{(2\pi)^{d/2}\, |\bSigma|^{1/2}} \exp\!\left(-\frac{1}{2}(\vb{x} - \bmu)^{\intercal} \bSigma^{-1} (\vb{x} - \bmu)\right),
+\end{equation}
+where:
+\begin{itemize}[leftmargin=2em]
+    \item $|\bSigma|$ is the determinant of $\bSigma$.
+    \item $\bSigma^{-1}$ is the inverse of $\bSigma$.
+    \item The quantity $(\vb{x} - \bmu)^{\intercal} \bSigma^{-1} (\vb{x} - \bmu)$ is called the \emph{Mahalanobis distance} squared. It measures how far $\vb{x}$ is from the mean $\bmu$, taking into account the shape of the distribution.
+\end{itemize}
+The \emph{iso-density contours} (curves where $f_{\vb{x}}$ is constant) are \emph{ellipsoids} centered at $\bmu$. The shape and orientation of these ellipsoids are determined by $\bSigma$:
+\begin{itemize}[leftmargin=2em]
+    \item If $\bSigma = \sigma^2 \vb{I}$ (a scalar times the identity matrix), the contours are \emph{spheres}. The uncertainty is the same in every direction. This is called \emph{isotropic} uncertainty.
+    \item If $\bSigma$ is diagonal (but with different diagonal entries), the contours are axis-aligned ellipsoids. The uncertainty differs along the coordinate axes.
+    \item If $\bSigma$ is a general positive definite matrix, the contours are arbitrarily oriented ellipsoids. This is \emph{anisotropic} uncertainty.
+\end{itemize}
+
+\subsection{A Useful Property: Linear Transformations of Gaussians}\label{sec:linear_transform_gaussian}
+
+We will need the following standard fact. If $\vb{x} \sim \Norm(\bmu, \bSigma)$ and $\vb{a} \in \R^d$ is a fixed vector, then the scalar $\vb{a}^{\intercal}\vb{x}$ follows a univariate Gaussian:
+\begin{equation}
+    \vb{a}^{\intercal}\vb{x} \sim \Norm\!\left(\vb{a}^{\intercal}\bmu,\; \vb{a}^{\intercal}\bSigma\vb{a}\right).
+\end{equation}
+\emph{Proof.} The mean is $\E[\vb{a}^{\intercal}\vb{x}] = \vb{a}^{\intercal}\E[\vb{x}] = \vb{a}^{\intercal}\bmu$. The variance is
+\begin{equation}
+    \text{Var}(\vb{a}^{\intercal}\vb{x}) = \E[(\vb{a}^{\intercal}\vb{x} - \vb{a}^{\intercal}\bmu)^2] = \E[\vb{a}^{\intercal}(\vb{x}-\bmu)(\vb{x}-\bmu)^{\intercal}\vb{a}] = \vb{a}^{\intercal}\bSigma\vb{a}.
+\end{equation}
+Gaussianity is preserved under linear transformations (a well-known property of the Gaussian family).
+
+\section{The Key Idea: Expected Hinge Loss}\label{sec:expected_hinge}
+
+Now comes the central idea of SVM-GSU. Instead of computing the hinge loss at the fixed point $\bmu_i$ (as the standard SVM would), we compute the \emph{expected value} (average) of the hinge loss over all possible positions of the $i$-th training example, weighted by the probability of each position under the Gaussian $\Norm(\bmu_i, \bSigma_i)$.
+
+\subsection{Why Take the Expected Value?}
+
+Think of it this way: the $i$-th training example is not a single point but a ``cloud'' of possible points, described by the Gaussian $\Norm(\bmu_i, \bSigma_i)$. Each possible point $\vb{x}$ in this cloud would incur a hinge loss of $\max(0, 1 - y_i(\vb{w}^{\intercal} \vb{x} + b))$. The expected hinge loss averages this over the entire cloud, weighting each point by how likely it is.
+
+Points that are more probable (near the mean $\bmu_i$) contribute more to the expected loss. Points that are less probable (far from $\bmu_i$) contribute less. This is exactly the right thing to do if we believe the data comes from this distribution.
+
+\subsection{The SVM-GSU Objective Function (Integral Form)}
+
+Recall that the standard SVM objective (\cref{eq:svm_objective}) was:
+\begin{equation*}
+    \obj_{\text{SVM}}(\vb{w}, b) = \underbrace{\frac{\lambda}{2}\|\vb{w}\|^2}_{\text{regularization}} + \frac{1}{n}\sum_{i=1}^{n} \underbrace{\max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x}_i + b\right)\right)}_{\text{hinge loss at } \vb{x}_i}.
+\end{equation*}
+The SVM-GSU objective replaces the hinge loss at the fixed point $\vb{x}_i$ with the \emph{expected} hinge loss over the Gaussian $\Norm(\bmu_i, \bSigma_i)$. The regularization term stays the same:
+\begin{equation}\label{eq:gsu_objective}
+    \obj_{\text{GSU}} (\vb{w}, b) = \underbrace{\frac{\lambda}{2}\|\vb{w}\|^2}_{\text{regularization}} + \frac{1}{n}\sum_{i=1}^{n} \underbrace{\int_{\R^d} \max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x} + b\right)\right) f_{\vb{x}_i}(\vb{x})\, \dd{\vb{x}}}_{{\loss_{\text{GSU}}}_{i}(\vb{w}, b) \;=\; \text{expected hinge loss for example } i},
+\end{equation}
+where $f_{\vb{x}_i}(\vb{x})$ is the Gaussian PDF of the $i$-th example (\cref{eq:gaussian_pdf} with $\bmu = \bmu_i$ and $\bSigma = \bSigma_i$). Note that $\vb{x}$ in the integral is a \emph{dummy variable of integration}. It ranges over all possible positions in $\R^d$.
+
+We can write the loss for the $i$-th example more compactly using expectation notation:
+\begin{equation}\label{eq:gsu_loss_compact}
+    {\loss_{\text{GSU}}}_{i}(\vb{w}, b) = \E_{\vb{x}_i \sim \Norm(\bmu_i, \bSigma_i)}\!\left[\max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x}_i + b\right)\right)\right].
+\end{equation}
+
+\begin{statusbox}[SVM-GSU Objective - Integral Form (\cref{eq:gsu_objective})]
+\vspace{-0.5em}
+\begin{equation*}
+    \obj_{\text{GSU}} (\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n} \underbrace{\int_{\R^d} \max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x} + b\right)\right) f_{\vb{x}_i}(\vb{x})\, \dd{\vb{x}}}_{{\loss_{\text{GSU}}}_{i}(\vb{w}, b) \;=\; \text{expected hinge loss for example } i}.
+\end{equation*}
+\vspace{-1em}
+\begin{center}\small
+\emph{The unknowns are $\vb{w}$ and $b$. Everything else ($\bmu_i$, $\bSigma_i$, $y_i$) is given data. The integral ${\loss_{\text{GSU}}}_{i}(\vb{w}, b)$ is not yet in a usable form. We evaluate it next.}
+\end{center}
+\end{statusbox}
+
+\section{Evaluating the Loss in Closed Form}\label{sec:loss_closed_form}
+
+The integral ${\loss_{\text{GSU}}}_{i}(\vb{w}, b)$ in \cref{eq:gsu_objective} looks daunting. Remarkably, it can be evaluated in \emph{closed form}, meaning we can write down an explicit formula without needing to compute the integral numerically.
+
+\subsection{Splitting the Integral Over a Halfspace}
+
+The hinge loss $\max(0, 1 - y_i(\vb{w}^{\intercal} \vb{x} + b))$ is zero when $y_i(\vb{w}^{\intercal} \vb{x} + b) \geq 1$, and equals $1 - y_i(\vb{w}^{\intercal} \vb{x} + b)$ when $y_i(\vb{w}^{\intercal} \vb{x} + b) < 1$. Therefore, the integral is only nonzero over the \emph{halfspace}:
+\begin{equation}
+    \Omega_i = \left\{ \vb{x} \in \R^d :\; y_i\!\left(\vb{w}^{\intercal} \vb{x} + b\right) \leq 1 \right\}.
+\end{equation}
+This is the set of points that are either misclassified or lie within the margin. So the loss becomes:
+\begin{equation}\label{eq:loss_halfspace}
+    {\loss_{\text{GSU}}}_{i}(\vb{w}, b) = \int_{\Omega_i} \left[1 - y_i\!\left(\vb{w}^{\intercal} \vb{x} + b\right)\right] f_{\vb{x}_i}(\vb{x})\, \dd{\vb{x}}.
+\end{equation}
+This integral involves integrating a \emph{linear function} times a \emph{Gaussian PDF} over a \emph{halfspace}. This is a well-known type of integral that can be evaluated analytically.
+
+\subsection{The Closed-Form Result (Theorem 1 from the Paper)}
+
+The paper proves (in Appendix A) the following key result. We state it here, and provide a full proof in Appendix~\ref{app:proof}.
+
+\begin{theorem}[Gaussian-Weighted Linear Integral Over a Halfspace]\label{thm:halfspace}
+Let $\vb{x} \in \R^d$ be a random vector with $\vb{x} \sim \Norm(\bmu, \bSigma)$. Let $H$ be the hyperplane $\vb{a}^{\intercal} \vb{x} + b' = 0$, which divides $\R^d$ into two halfspaces,
+\begin{equation}
+    \Omega^{\pm} = \{\vb{x} \in \R^d : \vb{a}^{\intercal} \vb{x} + b' \gtrless 0\}.
+\end{equation}
+Then the integrals
+\begin{equation}\label{eq:halfspace_integral_def}
+    I^{\pm}(\vb{a}, b') \equiv \int_{\Omega^{\pm}} (\vb{a}^{\intercal} \vb{x} + b')\, f_{\vb{x}}(\vb{x})\, \dd{\vb{x}}
+\end{equation}
+evaluate to
+\begin{equation}\label{eq:halfspace_integral}
+    I^{\pm}(\vb{a}, b') = \frac{d_{\bmu}}{2}\left(1 \pm \mathrm{erf}\!\left(\frac{d_{\bmu}}{d_{\bSigma}}\right)\right) \pm \frac{d_{\bSigma}}{2\sqrt{\pi}} \exp\!\left(-\frac{d_{\bmu}^2}{d_{\bSigma}^2}\right),
+\end{equation}
+where
+\begin{align}
+    d_{\bmu} &= \vb{a}^{\intercal} \bmu + b', \label{eq:d_mu}\\
+    d_{\bSigma} &= \sqrt{2\, \vb{a}^{\intercal} \bSigma\, \vb{a}}, \label{eq:d_sigma}
+\end{align}
+and $\mathrm{erf}(\cdot)$ is the \emph{error function}, defined as:
+\begin{equation}\label{eq:erf_def}
+    \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_0^x e^{-t^2}\, \dd{t}.
+\end{equation}
+\end{theorem}
+
+\subsection{What Is the Error Function?}
+
+The error function $\mathrm{erf}(x)$ is closely related to the cumulative distribution function (CDF) of the standard normal distribution in the following way:
+\begin{equation*}
+    \Phi(x) = \frac{1}{2}\left(1 + \mathrm{erf}\left(\frac{x}{\sqrt{2}}\right)\right).
+\end{equation*}
+This error function maps $\R$ to $(-1, 1)$, with the following properties:
+\begin{itemize}[leftmargin=2em]
+    \item $\mathrm{erf}(0) = 0$.
+    \item $\lim_{x\to \infty}\mathrm{erf}(x) = 1$.
+    \item $\lim_{x\to -\infty}\mathrm{erf}(x) = -1$.
+    \item It is an odd function: $\mathrm{erf}(-x) = -\mathrm{erf}(x)$.
+\end{itemize}
+It appears naturally whenever we integrate Gaussian functions over half-lines or halfspaces. It is available as a standard function in essentially all numerical computing libraries.
+
+An important identity we will use repeatedly is the derivative of the error function:
+\begin{equation}\label{eq:erf_derivative}
+    \dv{x}\mathrm{erf}(x) = \frac{2}{\sqrt{\pi}}e^{-x^2}.
+\end{equation}
+This follows directly from \cref{eq:erf_def} by the fundamental theorem of calculus.
+
+\subsection{Applying the Theorem to Obtain the SVM-GSU Loss}\label{sec:applying_thm}
+
+To apply \cref{thm:halfspace} to our loss function \cref{eq:loss_halfspace}, we need to match the notation. The halfspace $\Omega_i$ is defined by $y_i(\vb{w}^{\intercal} \vb{x} + b) \leq 1$. Rearranging:
+\begin{equation}
+    y_i(\vb{w}^{\intercal}\vb{x} + b) \leq 1 \iff y_i \vb{w}^{\intercal}\vb{x} + y_i b - 1 \leq 0 \iff -y_i\vb{w}^{\intercal}\vb{x} + (1 - y_i b) \geq 0.
+\end{equation}
+The integrand is $[1 - y_i(\vb{w}^{\intercal} \vb{x} + b)]$, which equals $(-y_i \vb{w})^{\intercal} \vb{x} + (1 - y_i b)$. Comparing with the theorem's integrand $\vb{a}^{\intercal} \vb{x} + b'$ over the halfspace $\Omega^+ = \{\vb{x}: \vb{a}^{\intercal}\vb{x} + b' \geq 0\}$, we identify:
+\begin{equation}
+    \vb{a} = -y_i \vb{w}, \qquad b' = 1 - y_i b.
+\end{equation}
+Substituting into \cref{eq:d_mu,eq:d_sigma}:
+\begin{align}
+    d_{\bmu_i} &\equiv d_{\bmu} = (-y_i \vb{w})^{\intercal} \bmu_i + (1 - y_i b) = -y_i\vb{w}^{\intercal}\bmu_i + 1 - y_i b \notag \\
+    &= 1 - y_i(\vb{w}^{\intercal} \bmu_i + b), \label{eq:dmu_def}\\
+    d_{\bSigma_i} &\equiv d_{\bSigma} = \sqrt{2\,(-y_i \vb{w})^{\intercal} \bSigma_i\, (-y_i \vb{w})} = \sqrt{2\, y_i^2\, \vb{w}^{\intercal} \bSigma_i\, \vb{w}} \notag \\
+    &= \sqrt{2\, \vb{w}^{\intercal} \bSigma_i\, \vb{w}}, \label{eq:dsigma_def}
+\end{align}
+where in the last step we used $y_i^2 = 1$ (since $y_i \in \{+1, -1\}$). Notice that $d_{\bSigma_i}$ does not depend on $y_i$ or on $b$. Applying the ``$+$'' branch of \cref{eq:halfspace_integral}, the closed-form loss for the $i$-th training example is:
+\begin{equation}\label{eq:gsu_loss_closed}
+    {\loss_{\text{GSU}}}_{i}(\vb{w}, b) = \frac{d_{\bmu_i}}{2}\left[\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right] + \frac{d_{\bSigma_i}}{2\sqrt{\pi}}\exp\!\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right).
+\end{equation}
+
+\subsection{The Full Objective with the Closed-Form Loss}\label{sec:gsu_full_objective}
+
+Now we substitute \cref{eq:gsu_loss_closed} back into the objective \cref{eq:gsu_objective}. The integral has been eliminated and the objective is now a fully explicit function of $\vb{w}$ and $b$:
+\begin{equation}\label{eq:gsu_objective_closed}
+    \obj_{\text{GSU}} (\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n}\underbrace{\left[\frac{d_{\bmu_i}}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right) + \frac{d_{\bSigma_i}}{2\sqrt{\pi}}\exp\!\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right)\right]}_{{\loss_{\text{GSU}}}_{i}(\vb{w}, b)},
+\end{equation}
+where $d_{\bmu_i} = 1 - y_i(\vb{w}^{\intercal} \bmu_i + b)$ and $d_{\bSigma_i} = \sqrt{2\, \vb{w}^{\intercal} \bSigma_i\, \vb{w}}$.
+
+\begin{statusbox}[SVM-GSU Objective - Closed Form (\cref{eq:gsu_objective_closed})]
+\vspace{-0.5em}
+\begin{equation*}
+    \obj_{\text{GSU}} (\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n}\underbrace{\left[\frac{d_{\bmu_i}}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right) + \frac{d_{\bSigma_i}}{2\sqrt{\pi}}\exp\!\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right)\right]}_{{\loss_{\text{GSU}}}_{i}(\vb{w}, b)}
+\end{equation*}
+\vspace{-1em}
+\begin{center}\small
+\emph{The only unknowns are $\vb{w}$ and $b$. The quantities $d_{\bmu_i}$ and $d_{\bSigma_i}$ are shorthand that depend on $\vb{w}$, $b$, and the given data ($\bmu_i$, $\bSigma_i$, $y_i$). No integrals remain. This is what we minimize.}
+\end{center}
+\end{statusbox}
+
+\subsection{Understanding the Two Quantities}\label{sec:understanding_d}
+
+Let us build intuition for the two key quantities $d_{\bmu_i}$ and $d_{\bSigma_i}$ appearing in the objective:
+\begin{itemize}
+    \item $d_{\bmu_i} = 1 - y_i(\vb{w}^{\intercal} \bmu_i + b)$:
+    \begin{itemize}
+        \item This is exactly the hinge loss argument of the \emph{mean} $\bmu_i$ in the standard SVM. If the mean is correctly classified and lies outside the margin, $d_{\bmu_i} < 0$. If the mean lies inside the margin or is misclassified, $d_{\bmu_i} > 0$.
+    \end{itemize}
+    \item $d_{\bSigma_i} = \sqrt{2\, \vb{w}^{\intercal} \bSigma_i\, \vb{w}}$:
+    \begin{itemize}
+        \item This measures the \emph{spread of the uncertainty in the direction of $\vb{w}$}. Using the linear-transformation property discussed in \cref{sec:linear_transform_gaussian}, if $\vb{x}_i \sim \Norm(\bmu_i, \bSigma_i)$, then $\vb{w}^{\intercal}\vb{x}_i \sim \Norm(\vb{w}^{\intercal}\bmu_i, \vb{w}^{\intercal}\bSigma_i\vb{w})$. So $\vb{w}^{\intercal}\bSigma_i\vb{w}$ is exactly the variance of the projection of $\vb{x}_i$ onto the direction $\vb{w}$, and $d_{\bSigma_i}$ is $\sqrt{2}$ times the standard deviation. This captures how much the uncertainty ``matters'' for classification, specifically, how much the Gaussian is spread out in the direction perpendicular to the decision boundary (since $\vb{w}$ is the normal vector to the hyperplane).
+    \end{itemize}
+\end{itemize}
+
+\begin{remark}[Sanity check]
+Look at \cref{eq:gsu_objective_closed}. The first term is the regularizer, identical to standard SVM. The second term is a sum over training examples, where each contribution depends on two things: how far the mean $\bmu_i$ is from the decision boundary (via $d_{\bmu_i}$) and how spread out the uncertainty is in the classification-relevant direction (via $d_{\bSigma_i}$). If a training example has large uncertainty that straddles the boundary, its loss contribution will be large, even if its mean is on the correct side.
+\end{remark}
+
+\subsection{Limiting Behavior: Recovering Standard SVM}\label{sec:gsu_limit}
+
+What happens in \cref{eq:gsu_objective_closed} when the uncertainty vanishes, i.e., $\bSigma_i \to \vb{0}$? Let us verify that SVM-GSU recovers the standard SVM hinge loss in this limit. As $\bSigma_i \to \vb{0}$, we have $d_{\bSigma_i} = \sqrt{2\vb{w}^{\intercal}\bSigma_i\vb{w}} \to 0^+$.
+
+\paragraph{Case 1: $d_{\bmu_i} > 0$ (mean is inside margin or misclassified).} Then $\frac{d_{\bmu_i}}{d_{\bSigma_i}} \to +\infty$, so we get $\mathrm{erf}\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) \to 1$. The first term becomes
+\begin{equation}
+    \frac{d_{\bmu_i}}{2}(1 + 1) = d_{\bmu_i}.
+\end{equation}
+For the second term, $\exp\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right) \to 0$ faster than any polynomial, and $d_{\bSigma_i} \to 0$, so the product $\frac{d_{\bSigma_i}}{2\sqrt{\pi}}\exp\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right) \to 0$. Thus ${\loss_{\text{GSU}}}_i \to d_{\bmu_i} = 1 - y_i(\vb{w}^{\intercal}\bmu_i + b) > 0$.
+
+\paragraph{Case 2: $d_{\bmu_i} < 0$ (mean is correctly classified, outside margin).} Then $\frac{d_{\bmu_i}}{d_{\bSigma_i}} \to -\infty$, so $\mathrm{erf}\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) \to -1$. The first term becomes
+\begin{equation}
+    \frac{d_{\bmu_i}}{2}(-1 + 1) = 0.
+\end{equation}
+The second term again vanishes. Thus ${\loss_{\text{GSU}}}_i \to 0$.
+
+\paragraph{Conclusion.} In both cases, ${\loss_{\text{GSU}}}_i \to \max(0, d_{\bmu_i}) = \max(0, 1 - y_i(\vb{w}^{\intercal}\bmu_i + b))$, which is exactly the standard SVM hinge loss evaluated at the mean. This confirms that \textbf{SVM-GSU is a strict generalization of the standard SVM}. The standard SVM is recovered as a special case when all covariance matrices tend to zero.
+
+\section{Gradients in Closed Form}\label{sec:gsu_gradients}
+
+To minimize the objective $\obj_{\text{GSU}} (\vb{w}, b)$ (i.e., \cref{eq:gsu_objective_closed}) using gradient descent, we need its partial derivatives with respect to $\vb{w}$ and $b$. We derive them below in full detail.
+
+\subsection{Setup}
+
+We restate the objective:
+\begin{equation}\label{eq:gsu_obj_restate}
+    \obj_{\text{GSU}} (\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n}\underbrace{\left[\frac{d_{\bmu_i}}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right) + \frac{d_{\bSigma_i}}{2\sqrt{\pi}}\exp\!\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right)\right]}_{{\loss_{\text{GSU}}}_{i}(\vb{w}, b)},
+\end{equation}
+where
+\begin{align*}
+    d_{\bmu_i} &= 1 - y_i(\vb{w}^{\intercal} \bmu_i + b), \\
+    d_{\bSigma_i} &= \sqrt{2\, \vb{w}^{\intercal} \bSigma_i\, \vb{w}}.
+\end{align*}
+We observe:
+\begin{itemize}[leftmargin=2em]
+    \item ${\loss_{\text{GSU}}}_{i}$ depends on $\vb{w}$ through \emph{both} $d_{\bmu_i}$ (linearly, via $\vb{w}^{\intercal}\bmu_i$) and $d_{\bSigma_i}$ (via the quadratic form $\vb{w}^{\intercal}\bSigma_i\vb{w}$).
+    \item ${\loss_{\text{GSU}}}_{i}$ depends on $b$ only through $d_{\bmu_i}$.
+\end{itemize}
+We will therefore use the chain rule. Let $r_i \equiv \frac{d_{\bmu_i}}{d_{\bSigma_i}}$ for brevity.
+
+\subsection{Step 1: Compute $\pdv{{\loss_{\text{GSU}}}_{i}}{d_{\mu_i}}$}
+
+We differentiate \cref{eq:gsu_loss_closed} with respect to $d_{\bmu_i}$, treating $d_{\bSigma_i}$ as a constant (the dependence of $d_{\bSigma_i}$ on $\vb{w}$ will be handled separately). The loss is
+\begin{equation}
+    {\loss_{\text{GSU}}}_{i} = \underbrace{\frac{d_{\bmu_i}}{2}\left(\mathrm{erf}(r_i) + 1\right)}_{\text{term A}} + \underbrace{\frac{d_{\bSigma_i}}{2\sqrt{\pi}}\exp(-r_i^2)}_{\text{term B}}.
+\end{equation}
+
+\paragraph{Derivative of term A.} By the product rule, treating $r_i = \frac{d_{\bmu_i}}{d_{\bSigma_i}}$:
+\begin{align}
+    \pdv{\text{A}}{d_{\bmu_i}} &= \frac{1}{2}(\mathrm{erf}(r_i) + 1) + \frac{d_{\bmu_i}}{2} \cdot \pdv{d_{\bmu_i}}\mathrm{erf}(r_i) \notag \\
+    &= \frac{1}{2}(\mathrm{erf}(r_i) + 1) + \frac{d_{\bmu_i}}{2} \cdot \mathrm{erf}'(r_i) \cdot \pdv{r_i}{d_{\bmu_i}}.
+\end{align}
+Using \cref{eq:erf_derivative}, $\mathrm{erf}'(r_i) = \frac{2}{\sqrt{\pi}}e^{-r_i^2}$, and $\pdv{r_i}{d_{\bmu_i}} = \frac{1}{d_{\bSigma_i}}$:
+\begin{equation}
+    \pdv{\text{A}}{d_{\bmu_i}} = \frac{1}{2}(\mathrm{erf}(r_i) + 1) + \frac{d_{\bmu_i}}{2} \cdot \frac{2}{\sqrt{\pi}}e^{-r_i^2} \cdot \frac{1}{d_{\bSigma_i}} = \frac{1}{2}(\mathrm{erf}(r_i) + 1) + \frac{d_{\bmu_i} e^{-r_i^2}}{\sqrt{\pi}\, d_{\bSigma_i}}.
+\end{equation}
+
+\paragraph{Derivative of term B.} Here $d_{\bSigma_i}$ is treated as constant and only $r_i$ depends on $d_{\bmu_i}$:
+\begin{equation}
+    \pdv{\text{B}}{d_{\bmu_i}} = \frac{d_{\bSigma_i}}{2\sqrt{\pi}} \cdot e^{-r_i^2} \cdot (-2r_i) \cdot \pdv{r_i}{d_{\bmu_i}} = \frac{d_{\bSigma_i}}{2\sqrt{\pi}}\cdot e^{-r_i^2}\cdot(-2r_i)\cdot\frac{1}{d_{\bSigma_i}} = -\frac{r_i\, e^{-r_i^2}}{\sqrt{\pi}}.
+\end{equation}
+Substituting $r_i = \frac{d_{\bmu_i}}{d_{\bSigma_i}}$:
+\begin{equation}
+    \pdv{\text{B}}{d_{\bmu_i}} = -\frac{d_{\bmu_i}\, e^{-r_i^2}}{\sqrt{\pi}\, d_{\bSigma_i}}.
+\end{equation}
+
+\paragraph{Sum.} Adding the two derivatives, the terms $\frac{d_{\bmu_i}e^{-r_i^2}}{\sqrt{\pi}d_{\bSigma_i}}$ and $-\frac{d_{\bmu_i}e^{-r_i^2}}{\sqrt{\pi}d_{\bSigma_i}}$ cancel:
+\begin{equation}\label{eq:dL_ddmu}
+    \boxed{\;\pdv{{\loss_{\text{GSU}}}_{i}}{d_{\bmu_i}} = \frac{1}{2}\!\left(\mathrm{erf}(r_i) + 1\right).\;}
+\end{equation}
+This is a remarkably clean result.
+
+\subsection{Step 2: Compute $\pdv{{\loss_{\text{GSU}}}_{i}}{d_{\bSigma_i}}$}
+
+Now we differentiate with respect to $d_{\bSigma_i}$, treating $d_{\bmu_i}$ as constant.
+
+\paragraph{Derivative of term A.} Only $r_i$ depends on $d_{\bSigma_i}$ here, since the coefficient $\frac{d_{\bmu_i}}{2}$ is constant. Using $\pdv{r_i}{d_{\bSigma_i}} = -\frac{d_{\bmu_i}}{d_{\bSigma_i}^2}$:
+\begin{equation}
+    \pdv{\text{A}}{d_{\bSigma_i}} = \frac{d_{\bmu_i}}{2} \cdot \mathrm{erf}'(r_i) \cdot \pdv{r_i}{d_{\bSigma_i}} = \frac{d_{\bmu_i}}{2}\cdot\frac{2}{\sqrt{\pi}}e^{-r_i^2}\cdot\left(-\frac{d_{\bmu_i}}{d_{\bSigma_i}^2}\right) = -\frac{d_{\bmu_i}^2\, e^{-r_i^2}}{\sqrt{\pi}\, d_{\bSigma_i}^2}.
+\end{equation}
+
+\paragraph{Derivative of term B.} By the product rule:
+\begin{align}
+    \pdv{\text{B}}{d_{\bSigma_i}} &= \frac{1}{2\sqrt{\pi}}e^{-r_i^2} + \frac{d_{\bSigma_i}}{2\sqrt{\pi}}\cdot e^{-r_i^2}\cdot(-2r_i)\cdot\pdv{r_i}{d_{\bSigma_i}} \notag \\
+    &= \frac{e^{-r_i^2}}{2\sqrt{\pi}} + \frac{d_{\bSigma_i}}{2\sqrt{\pi}}\cdot e^{-r_i^2}\cdot(-2r_i)\cdot\left(-\frac{d_{\bmu_i}}{d_{\bSigma_i}^2}\right) \notag \\
+    &= \frac{e^{-r_i^2}}{2\sqrt{\pi}} + \frac{r_i d_{\bmu_i}\, e^{-r_i^2}}{\sqrt{\pi}\, d_{\bSigma_i}} \notag \\
+    &= \frac{e^{-r_i^2}}{2\sqrt{\pi}} + \frac{d_{\bmu_i}^2\, e^{-r_i^2}}{\sqrt{\pi}\, d_{\bSigma_i}^2},
+\end{align}
+where in the last step we used $r_i = \frac{d_{\bmu_i}}{d_{\bSigma_i}}$.
+
+\paragraph{Sum.} Adding, the terms $-\frac{d_{\bmu_i}^2 e^{-r_i^2}}{\sqrt{\pi} d_{\bSigma_i}^2}$ and $+\frac{d_{\bmu_i}^2 e^{-r_i^2}}{\sqrt{\pi}d_{\bSigma_i}^2}$ cancel:
+\begin{equation}\label{eq:dL_ddSigma}
+    \boxed{\;\pdv{{\loss_{\text{GSU}}}_{i}}{d_{\bSigma_i}} = \frac{e^{-r_i^2}}{2\sqrt{\pi}}.\;}
+\end{equation}
+
+\subsection{Step 3: Compute $\pdv{d_{\mu_i}}{\vb{w}}$ and $\pdv{d_{\mu_i}}{b}$}
+
+Since $d_{\bmu_i} = 1 - y_i(\vb{w}^{\intercal}\bmu_i + b) = 1 - y_i\vb{w}^{\intercal}\bmu_i - y_i b$:
+\begin{equation}\label{eq:ddmu_dw}
+    \pdv{d_{\bmu_i}}{\vb{w}} = -y_i \bmu_i,
+\end{equation}
+\begin{equation}\label{eq:ddmu_db}
+    \pdv{d_{\bmu_i}}{b} = -y_i.
+\end{equation}
+
+\subsection{Step 4: Compute $\pdv{d_{\bSigma_i}}{\vb{w}}$}
+
+We have $d_{\bSigma_i} = \sqrt{2\vb{w}^{\intercal}\bSigma_i\vb{w}}$. First, note that for a symmetric matrix $\bSigma_i$,
+\begin{equation}
+    \pdv{\vb{w}}\left(\vb{w}^{\intercal}\bSigma_i\vb{w}\right) = (\bSigma_i + \bSigma_i^{\intercal})\vb{w} = 2\bSigma_i\vb{w}.
+\end{equation}
+Therefore, by the chain rule:
+\begin{equation}\label{eq:ddSigma_dw}
+    \pdv{d_{\bSigma_i}}{\vb{w}} = \frac{1}{2}\left(2\vb{w}^{\intercal}\bSigma_i\vb{w}\right)^{-1/2}\cdot 2\cdot 2\bSigma_i\vb{w} = \frac{2\bSigma_i\vb{w}}{\sqrt{2\vb{w}^{\intercal}\bSigma_i\vb{w}}} = \frac{2\bSigma_i\vb{w}}{d_{\bSigma_i}}.
+\end{equation}
+Also, $d_{\bSigma_i}$ does not depend on $b$:
+\begin{equation}\label{eq:ddSigma_db}
+    \pdv{d_{\bSigma_i}}{b} = \vb{0}.
+\end{equation}
+
+\subsection{Step 5: Assemble the Gradient with Respect to $\vb{w}$}
+
+By the chain rule:
+\begin{equation}
+    \pdv{{\loss_{\text{GSU}}}_{i}}{\vb{w}} = \pdv{{\loss_{\text{GSU}}}_{i}}{d_{\bmu_i}}\cdot\pdv{d_{\bmu_i}}{\vb{w}} + \pdv{{\loss_{\text{GSU}}}_{i}}{d_{\bSigma_i}}\cdot\pdv{d_{\bSigma_i}}{\vb{w}}.
+\end{equation}
+Substituting \cref{eq:dL_ddmu,eq:ddmu_dw,eq:dL_ddSigma,eq:ddSigma_dw}:
+\begin{align}
+    \pdv{{\loss_{\text{GSU}}}_{i}}{\vb{w}} &= \frac{1}{2}(\mathrm{erf}(r_i) + 1)\cdot(-y_i\bmu_i) + \frac{e^{-r_i^2}}{2\sqrt{\pi}}\cdot\frac{2\bSigma_i\vb{w}}{d_{\bSigma_i}} \notag \\
+    &= \frac{e^{-r_i^2}}{\sqrt{\pi}\, d_{\bSigma_i}}\bSigma_i\vb{w} - \frac{y_i}{2}\!\left[\mathrm{erf}(r_i) + 1\right]\bmu_i.
+\end{align}
+Substituting back $r_i = \frac{d_{\bmu_i}}{d_{\bSigma_i}}$ and adding the regularizer's gradient $\lambda\vb{w}$:
+\begin{equation}\label{eq:gsu_grad_w}
+    \boxed{\;\pdv{\obj_{\text{GSU}}}{\vb{w}} = \lambda\vb{w} + \frac{1}{n}\sum_{i=1}^{n}\!\left[\frac{\exp\!\left(-\frac{d_{\bmu_i}^2}{d_{\bSigma_i}^2}\right)}{\sqrt{\pi}\, d_{\bSigma_i}}\bSigma_i\vb{w} - \frac{y_i}{2}\!\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right)\bmu_i\right].\;}
+\end{equation}
+The two terms inside the sum have clear interpretations:
+\begin{enumerate}[leftmargin=2em]
+    \item The first term, involving $\bSigma_i\vb{w}$, arises from the dependence of $d_{\bSigma_i}$ on $\vb{w}$. It has no analog in the standard SVM and is the new contribution due to uncertainty.
+    \item The second term, involving $\bmu_i$, is analogous to the gradient of the hinge loss in standard SVM, but modulated by a ``soft'' factor $\frac{1}{2}(\mathrm{erf}(\cdot) + 1)$ that smoothly transitions between 0 and 1 instead of the hard step function in standard SVM.
+\end{enumerate}
+
+\subsection{Step 6: Assemble the Gradient with Respect to $b$}
+
+Since $d_{\bSigma_i}$ does not depend on $b$ (\cref{eq:ddSigma_db}), only the $d_{\bmu_i}$ pathway contributes:
+\begin{equation}
+    \pdv{{\loss_{\text{GSU}}}_{i}}{b} = \pdv{{\loss_{\text{GSU}}}_{i}}{d_{\bmu_i}}\cdot\pdv{d_{\bmu_i}}{b} = \frac{1}{2}(\mathrm{erf}(r_i) + 1)\cdot(-y_i) = -\frac{y_i}{2}(\mathrm{erf}(r_i) + 1).
+\end{equation}
+Summing over all examples (the regularizer does not depend on $b$):
+\begin{equation}\label{eq:gsu_grad_b}
+    \boxed{\;\pdv{\obj_{\text{GSU}}}{b} = -\frac{1}{n}\sum_{i=1}^{n}\frac{y_i}{2}\!\left[\mathrm{erf}\!\left(\frac{d_{\bmu_i}}{d_{\bSigma_i}}\right) + 1\right].\;}
+\end{equation}
+
+\begin{remark}[Note on the original paper's gradient expressions]
+The gradient expressions given in the original paper (Eqs.~(7)--(8) of \textcite{tzelepis2017linear}) appear to contain transcription errors. Specifically, their Eq.~(7) omits the factor $y_i$ in the term multiplying $\bmu_i$ (their $\vb{x}_i$), and their Eq.~(8) omits both the factor $y_i$ and the factor $\frac{1}{2}$ from the bias gradient. Our expressions \cref{eq:gsu_grad_w,eq:gsu_grad_b} follow from a careful application of the chain rule, as shown above, and can be verified against numerical (finite-difference) gradients.
+\end{remark}
+
+\subsection{Computational Cost}
+
+The key computational cost per training example is:
+\begin{itemize}[leftmargin=2em]
+    \item $\vb{w}^{\intercal} \bmu_i$: an inner product, $\mathcal{O}(d)$. Same as standard SVM.
+    \item $\vb{w}^{\intercal} \bSigma_i \vb{w}$: a quadratic form. $\mathcal{O}(d^2)$ for a general covariance matrix, but $\mathcal{O}(d)$ if $\bSigma_i$ is diagonal (the common case in practice).
+\end{itemize}
+
+\begin{remark}[Sanity check]
+Both $\vb{w}^{\intercal}\bmu_i$ and $\vb{w}^{\intercal}\bSigma_i\vb{w}$ need to be computed only \emph{once} per example per iteration, since they appear in both the loss and the gradient formulas. So the cost of SVM-GSU with diagonal covariances is essentially the same as the cost of standard SVM.
+\end{remark}
+
+\section{Convexity of the SVM-GSU Objective}\label{sec:gsu_convexity}
+
+\begin{proposition}\label{prop:gsu_convex}
+The SVM-GSU objective $\obj_{\text{GSU}}(\vb{w}, b)$ given by \cref{eq:gsu_objective_closed} is strongly convex with respect to $(\vb{w}, b)$.
+\end{proposition}
+
+\begin{proof}
+We break the objective into parts and use standard preservation-of-convexity results.
+
+\paragraph{Regularizer.} The function $(\vb{w}, b) \mapsto \frac{\lambda}{2}\|\vb{w}\|^2$ is strongly convex in $\vb{w}$ (its Hessian is $\lambda\vb{I}$, positive definite) and constant (hence convex) in $b$. Therefore, it is strongly convex in $(\vb{w}, b)$ jointly.
+
+\paragraph{Each per-example loss.} Consider the integrand at a fixed $\vb{x}$:
+\begin{equation}
+    h_i(\vb{w}, b; \vb{x}) = \max(0, 1 - y_i(\vb{w}^{\intercal}\vb{x} + b)).
+\end{equation}
+The argument inside the max, $1 - y_i(\vb{w}^{\intercal}\vb{x} + b)$, is an affine (hence convex) function of $(\vb{w}, b)$. The function $\max(0, \cdot)$ is convex and non-decreasing. The composition of a convex non-decreasing function with a convex function is convex. Hence $h_i(\cdot, \cdot; \vb{x})$ is convex in $(\vb{w}, b)$ for every fixed $\vb{x}$.
+
+The per-example loss is
+\begin{equation}
+    {\loss_{\text{GSU}}}_{i}(\vb{w}, b) = \int_{\R^d} h_i(\vb{w}, b; \vb{x}) f_{\vb{x}_i}(\vb{x})\,\dd{\vb{x}}.
+\end{equation}
+This is an integral of convex functions against a non-negative weight $f_{\vb{x}_i}(\vb{x})$. Equivalently, for any $\alpha \in [0, 1]$ and any $(\vb{w}_1, b_1), (\vb{w}_2, b_2)$:
+\begin{align}
+    {\loss_{\text{GSU}}}_{i}(\alpha(\vb{w}_1, b_1) + (1-\alpha)(\vb{w}_2, b_2)) &= \int h_i(\alpha(\vb{w}_1, b_1) + (1-\alpha)(\vb{w}_2, b_2); \vb{x})\, f_{\vb{x}_i}(\vb{x})\,\dd{\vb{x}} \notag \\
+    &\leq \int [\alpha h_i(\vb{w}_1, b_1; \vb{x}) + (1-\alpha) h_i(\vb{w}_2, b_2; \vb{x})]\, f_{\vb{x}_i}(\vb{x})\,\dd{\vb{x}} \notag \\
+    &= \alpha\,{\loss_{\text{GSU}}}_{i}(\vb{w}_1, b_1) + (1-\alpha)\,{\loss_{\text{GSU}}}_{i}(\vb{w}_2, b_2).
+\end{align}
+So each ${\loss_{\text{GSU}}}_{i}$ is convex.
+
+\paragraph{Conclusion.} A non-negative combination of convex functions is convex, so the average $\frac{1}{n}\sum_i {\loss_{\text{GSU}}}_{i}$ is convex. Adding the strongly convex regularizer yields a strongly convex objective, which therefore has a unique global minimum.
+\end{proof}
+
+\section{The SGD Solver (Pegasos-Style)}\label{sec:sgd_solver}
+
+The SVM-GSU optimization problem is solved using a stochastic gradient descent (SGD) algorithm inspired by the Pegasos algorithm. At each iteration, instead of computing the gradient using the entire training set (which can be expensive for large $n$), we randomly sample a small subset (``mini-batch'') and compute an approximate gradient.
+
+\subsection{Algorithm Description}
+
+The following \cref{alg:sgd_gsu} presents the stochastic sub-gradient descent procedure for solving the SVM-GSU optimization problem.
+
+\begin{algorithm}[H]
+\caption{Stochastic sub-gradient descent for SVM-GSU (Pegasos-style).}
+\label{alg:sgd_gsu}
+\begin{algorithmic}[1]
+\Require Training set $\setX'$, regularization parameter $\lambda > 0$, number of iterations $T \in \mathbb{N}$, mini-batch size $k \in \mathbb{N}$.
+\Ensure Learned parameters $\vb{w}^{(T+1)}$, $b^{(T+1)}$.
+\State Initialize $b^{(1)} \gets 0$ and $\vb{w}^{(1)}$ such that $\|\vb{w}^{(1)}\| \leq \nicefrac{1}{\sqrt{\lambda}}$.
+\For{$t = 1, 2, \ldots, T$}
+    \State Sample a random mini-batch $\setX_t \subseteq \setX'$ with $|\setX_t| = k$.
+    \State Set learning rate $\eta_t \gets \nicefrac{1}{\lambda t}$.
+    \State Compute $\pdv{\obj_{\text{GSU}}}{\vb{w}}$ and $\pdv{\obj_{\text{GSU}}}{b}$ using \cref{eq:gsu_grad_w,eq:gsu_grad_b} on $\setX_t$.
+    \State $\vb{w}^{(t+1)} \gets \vb{w}^{(t)} - \eta_t\, \pdv{\obj_{\text{GSU}}}{\vb{w}}$ \Comment{Gradient step on $\vb{w}$}
+    \State $\vb{w}^{(t+1)} \gets \min\!\left(1,\; \frac{1}{\sqrt{\lambda}\,\|\vb{w}^{(t+1)}\|}\right) \vb{w}^{(t+1)}$ \Comment{Project onto $\|\vb{w}\| \leq \nicefrac{1}{\sqrt{\lambda}}$}
+    \State $b^{(t+1)} \gets b^{(t)} - \eta_t\, \pdv{\obj_{\text{GSU}}}{b}$ \Comment{Gradient step on $b$}
+\EndFor
+\State \Return $\vb{w}^{(T+1)}$, $b^{(T+1)}$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Learning in Linear Subspaces}\label{sec:subspace}
+
+When the dimensionality $d$ is very large, but most of the uncertainty (variance) of each Gaussian lies in a low-dimensional subspace, we can speed up computation by projecting into that subspace. For each training example $i$, we perform eigendecomposition of $\bSigma_i$ and keep the top $d_i$ eigenvectors preserving a fraction $p$ of the total variance, giving a projection matrix $\vb{P}_i \in \R^{d_i \times d}$. The projected quantities $\vb{z}_i = \vb{P}_i \bmu_i$ and $\bSigma_i^z = \vb{P}_i \bSigma_i \vb{P}_i^{\intercal}$ (which is diagonal) yield the same loss form as \cref{eq:gsu_loss_closed} in the lower-dimensional space.
+
+
+\section{To Sample or Not to Sample?}\label{sec:sampling}
+
+One might wonder: why not just draw many samples from each Gaussian and train a standard SVM? A concentration inequality by \textcite{cirel2006norms} shows:
+\begin{equation}\label{eq:concentration}
+    P\!\left(\left|{\loss_{\text{GSU}}}_{i} - \tilde{\loss}_{{\text{GSU}}_{i,N}}\right| \geq r\right) \leq 2\exp\!\left(-\frac{r^2}{2\|\vb{w}\|^2}\right),
+\end{equation}
+where $\tilde{\loss}_{{\text{GSU}}_{i,N}}$ is the sample-based approximation using $N$ samples. The bound on the right-hand side depends on $\|\vb{w}\|^2$. Although the Pegasos algorithm constrains $\|\vb{w}\|$ to a ball of radius $\nicefrac{1}{\sqrt{\lambda}}$, the fundamental difficulty with sampling in high-dimensional spaces is that Gaussian distributions spread their probability mass more thinly as the dimensionality grows. Consequently, far more samples are needed to adequately represent the distribution in higher dimensions. In experiments, approximately $10^3$ samples per Gaussian were needed in 2D and $5 \times 10^4$ in 3D to match SVM-GSU's hyperplane. In high-dimensional problems ($d$ in the hundreds or thousands), sampling becomes infeasible, making the closed-form approach essential.
+
+% =====================================================================
+% PART IV: EXTENSION TO GAUSSIAN MIXTURE UNCERTAINTY
+% =====================================================================
+\part{Extension: SVM with Gaussian Mixture Uncertainty (SVM-GMU)}
+
+\begin{statusbox}[Roadmap for Part IV]
+We will proceed in four steps, mirroring the structure of Part~III:
+\begin{enumerate}[leftmargin=1.5em, topsep=2pt, itemsep=1pt]
+    \item \textbf{Motivate} why Gaussian uncertainty is not always enough (\cref{sec:gmu_motivation}).
+    \item \textbf{Write down} the objective function with a GMM density inside the integral (\cref{sec:gmu_objective}).
+    \item \textbf{Swap} the sum and integral (linearity of integration), recognizing each term as an SVM-GSU loss we already know how to evaluate.
+    \item \textbf{Substitute} the SVM-GSU closed form to get the fully explicit SVM-GMU objective, then \textbf{differentiate} it.
+\end{enumerate}
+As before, we will display the evolving objective at each stage.
+\end{statusbox}
+
+\section{Motivation: Why Go Beyond Gaussian Uncertainty?}\label{sec:gmu_motivation}
+
+The SVM-GSU framework assumes that the uncertainty of each training example is described by a single multivariate Gaussian. While this is flexible (it allows anisotropic, example-specific uncertainty), Gaussian distributions have a fundamental limitation: their iso-density contours are always \emph{ellipsoids}. This means:
+\begin{itemize}[leftmargin=2em]
+    \item The uncertainty is always \emph{unimodal} (one peak).
+    \item The shape is always \emph{ellipsoidal}. Complex shapes like banana-shaped, crescent-shaped, or multi-lobed uncertainty regions cannot be captured.
+    \item The distribution is always \emph{symmetric} around its mean. Skewed uncertainty is not representable.
+\end{itemize}
+
+\section{Gaussian Mixture Models (GMMs) as Universal Approximators}
+
+The solution is to model the uncertainty as a \emph{Gaussian Mixture Model} (GMM). A GMM is a weighted sum of several Gaussian distributions:
+\begin{equation}\label{eq:gmm_pdf}
+    f_{\vb{x}_i}(\vb{x}) = \sum_{m=1}^{M_i} \pi_i^{(m)}\, \Norm\!\left(\vb{x};\; \bmu_i^{(m)},\, \bSigma_i^{(m)}\right),
+\end{equation}
+where $M_i$ is the number of components, $\pi_i^{(m)} \geq 0$ are mixing weights with $\sum_m \pi_i^{(m)} = 1$, and each component has mean $\bmu_i^{(m)} \in \R^d$ and covariance $\bSigma_i^{(m)} \in \mathbb{S}^d_{++}$.
+
+GMMs are \emph{universal density approximators}: given enough components, a GMM can approximate any continuous probability distribution to arbitrary accuracy.
+
+\section{The New Training Set for SVM-GMU}\label{sec:gmu_training_set}
+
+The new training set considering Gaussian mixture uncertainty is then:
+\begin{equation}\label{eq:gmu_training_set}
+    \setX'' = \left\{ \left(\left\{\pi_i^{(m)},\, \bmu_i^{(m)},\, \bSigma_i^{(m)}\right\}_{m=1}^{M_i},\; y_i\right) :\; i = 1, \ldots, n \right\}.
+\end{equation}
+
+\section{Deriving the SVM-GMU Objective Function}\label{sec:gmu_objective}
+
+\subsection{Stage 1: The Objective with the GMM Integral}
+
+Just as in SVM-GSU, we replace the hinge loss with its expected value. The objective has the same structure as \cref{eq:gsu_objective}, but with the GMM density $f_{\vb{x}_i}$ from \cref{eq:gmm_pdf}:
+\begin{equation}\label{eq:gmu_obj_integral}
+    \obj_{\text{GMU}}(\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n} \underbrace{\int_{\R^d} \max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x} + b\right)\right) f_{\vb{x}_i}(\vb{x})\, \dd{\vb{x}}}_{{\loss_{\text{GMU}}}_{i}(\vb{w}, b)}.
+\end{equation}
+
+\begin{statusbox}[SVM-GMU Objective - Stage 1: Integral Form (\cref{eq:gmu_obj_integral})]
+\vspace{-0.5em}
+\begin{equation*}
+    \obj_{\text{GMU}}(\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n} \underbrace{\int_{\R^d} \max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x} + b\right)\right) f_{\vb{x}_i}(\vb{x})\, \dd{\vb{x}}}_{{\loss_{\text{GMU}}}_{i}(\vb{w}, b)}.
+\end{equation*}
+\vspace{-1em}
+\begin{center}\small
+\emph{Same structure as SVM-GSU (\cref{eq:gsu_objective}), but $f_{\vb{x}_i}$ is now a GMM, not a single Gaussian. The integral ${\loss_{\text{GMU}}}_{i}(\vb{w}, b)$ is not yet tractable.}
+\end{center}
+\end{statusbox}
+
+\subsection{Stage 2: Substituting the GMM Density and Swapping Sum and Integral}
+
+In \cref{eq:gmu_obj_integral}, we now substitute $f_{\vb{x}_i}(\vb{x})$ with the GMM density from \cref{eq:gmm_pdf}:
+\begin{multline}\label{eq:gmu_substitution}
+    \obj_{\text{GMU}}(\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 \\+ \frac{1}{n}\sum_{i=1}^{n} \underbrace{\int_{\R^d} \max\!\left(0,\; 1 - y_i\!\left(\vb{w}^{\intercal} \vb{x} + b\right)\right) \left[\sum_{m=1}^{M_i} \pi_i^{(m)}\, \Norm\!\left(\vb{x};\; \bmu_i^{(m)},\, \bSigma_i^{(m)}\right)\right]\, \dd{\vb{x}}}_{{\loss_{\text{GMU}}}_{i}(\vb{w}, b)}.
+\end{multline}
+
+\paragraph{Justification for swapping sum and integral.} We use the linearity of the integral. The integrand is a finite sum of non-negative integrable terms (the hinge loss is non-negative, each Gaussian PDF is non-negative, and each $\pi_i^{(m)} \geq 0$), so Tonelli's theorem justifies exchanging the finite sum and the integral:
+\begin{equation}\label{eq:gmu_swap}
+    \obj_{\text{GMU}}(\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n}\underbrace{\sum_{m=1}^{M_i} \pi_i^{(m)} \underbrace{\int_{\R^d} \max\!\left(0,\; 1 - y_i(\vb{w}^{\intercal} \vb{x} + b)\right) \Norm\!\left(\vb{x};\; \bmu_i^{(m)}, \bSigma_i^{(m)}\right) \dd{\vb{x}}}_{{\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b) \;=\; \text{SVM-GSU loss for component } m}}_{{\loss_{\text{GMU}}}_{i}(\vb{w}, b)}.
+\end{equation}
+Each integral ${\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b)$ is \emph{exactly} the SVM-GSU loss (\cref{eq:gsu_loss_closed}) for a Gaussian with mean $\bmu_i^{(m)}$ and covariance $\bSigma_i^{(m)}$. We already know its closed form.
+
+\begin{statusbox}[SVM-GMU Objective - Stage 2: Mixture Form (\cref{eq:gmu_swap})]
+\vspace{-0.5em}
+\begin{equation*}
+    \obj_{\text{GMU}}(\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_{i=1}^{n}\underbrace{\sum_{m=1}^{M_i} \pi_i^{(m)} \underbrace{\int_{\R^d} \max\!\left(0,\; 1 - y_i(\vb{w}^{\intercal} \vb{x} + b)\right) \Norm\!\left(\vb{x};\; \bmu_i^{(m)}, \bSigma_i^{(m)}\right) \dd{\vb{x}}}_{{\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b) \;=\; \text{SVM-GSU loss for component } m}}_{{\loss_{\text{GMU}}}_{i}(\vb{w}, b)},
+\end{equation*}
+\vspace{-1em}
+\begin{center}\small
+\emph{Each ${\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b)$ is still an integral, but one we already evaluated in closed form in \cref{sec:loss_closed_form}.}
+\end{center}
+\end{statusbox}
+
+\subsection{Stage 3: The Fully Explicit SVM-GMU Objective}
+
+Applying the closed-form loss \cref{eq:gsu_loss_closed} to each component, with:
+\begin{align}
+    d_{\bmu_i}^{(m)} &= 1 - y_i\left(\vb{w}^{\intercal} \bmu_i^{(m)} + b\right), \label{eq:dmu_m}\\
+    d_{\bSigma_i}^{(m)} &= \sqrt{2\, \vb{w}^{\intercal} \bSigma_i^{(m)} \vb{w}}, \label{eq:dsigma_m}
+\end{align}
+we get the component loss:
+\begin{equation}\label{eq:component_loss}
+    {\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b) = \frac{d_{\bmu_i}^{(m)}}{2}\left[\mathrm{erf}\!\left(\frac{d_{\bmu_i}^{(m)}}{d_{\bSigma_i}^{(m)}}\right) + 1\right] + \frac{d_{\bSigma_i}^{(m)}}{2\sqrt{\pi}}\exp\!\left(-\frac{\left(d_{\bmu_i}^{(m)}\right)^2}{\left(d_{\bSigma_i}^{(m)}\right)^2}\right).
+\end{equation}
+The total loss for the $i$-th example is the weighted sum:
+\begin{equation}\label{eq:gmu_loss}
+    {\loss_{\text{GMU}}}_{i}(\vb{w}, b) = \sum_{m=1}^{M_i} \pi_i^{(m)}\, {\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b).
+\end{equation}
+And the \textbf{full SVM-GMU objective} is:
+\begin{equation}\label{eq:gmu_objective}
+    \obj_{\text{GMU}}(\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2
+    + \frac{1}{n}\sum_{i=1}^{n}\underbrace{\sum_{m=1}^{M_i} \pi_i^{(m)}\underbrace{\left[\frac{d_{\bmu_i}^{(m)}}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}^{(m)}}{d_{\bSigma_i}^{(m)}}\right) + 1\right) + \frac{d_{\bSigma_i}^{(m)}}{2\sqrt{\pi}}\exp\!\left(-\frac{(d_{\bmu_i}^{(m)})^2}{(d_{\bSigma_i}^{(m)})^2}\right)\right]}_{{\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b)}}_{{\loss_{\text{GMU}}}_{i}(\vb{w}, b)}.
+\end{equation}
+
+\begin{statusbox}[SVM-GMU Objective - Stage 3: Fully Explicit Closed Form (\cref{eq:gmu_objective})]
+\vspace{-0.5em}
+\begin{equation*}
+    \obj_{\text{GMU}}(\vb{w}, b) = \frac{\lambda}{2}\|\vb{w}\|^2
+    + \frac{1}{n}\sum_{i=1}^{n}\underbrace{\sum_{m=1}^{M_i} \pi_i^{(m)}\underbrace{\left[\frac{d_{\bmu_i}^{(m)}}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}^{(m)}}{d_{\bSigma_i}^{(m)}}\right) + 1\right) + \frac{d_{\bSigma_i}^{(m)}}{2\sqrt{\pi}}\exp\!\left(-\frac{(d_{\bmu_i}^{(m)})^2}{(d_{\bSigma_i}^{(m)})^2}\right)\right]}_{{\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b)}}_{{\loss_{\text{GMU}}}_{i}(\vb{w}, b)}
+\end{equation*}
+\vspace{-1em}
+\begin{center}\small
+\emph{The only unknowns are still $\vb{w}$ and $b$. Compared to SVM-GSU (\cref{eq:gsu_objective_closed}), the only structural difference is the extra sum over components $m$ with weights $\pi_i^{(m)}$. No integrals remain. This is what we minimize.}
+\end{center}
+\end{statusbox}
+
+\begin{remark}[Sanity check]
+Setting $M_i = 1$ and $\pi_i^{(1)} = 1$ for all $i$ collapses the inner sum to a single term, and \cref{eq:gmu_objective} reduces exactly to the SVM-GSU objective \cref{eq:gsu_objective_closed}. Further setting $\bSigma_i^{(1)} \to \vb{0}$ recovers the standard SVM. The nesting is: Standard SVM $\subset$ SVM-GSU $\subset$ SVM-GMU.
+\end{remark}
+
+\section{Gradients of the SVM-GMU Objective}\label{sec:gmu_gradients}
+
+We differentiate the closed-form objective \cref{eq:gmu_objective}. Since it has the form
+\begin{equation*}
+    \frac{\lambda}{2}\|\vb{w}\|^2 + \frac{1}{n}\sum_i \sum_m \pi_i^{(m)} {\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b),
+\end{equation*}
+and differentiation is linear, each gradient is the regularizer's contribution plus a weighted sum of the per-component gradients. Each per-component gradient is exactly the SVM-GSU gradient from \cref{eq:gsu_grad_w,eq:gsu_grad_b}, applied to the component parameters $\bmu_i^{(m)}$ and $\bSigma_i^{(m)}$.
+
+\subsection{Derivation of the Gradient with Respect to $\vb{w}$}
+
+Starting from the gradient of a single SVM-GSU component loss (derived in \cref{sec:gsu_gradients}):
+\begin{equation}
+    \pdv{{\loss_{\text{GSU}}}_{i}^{(m)}}{\vb{w}} = \frac{\exp\!\left(-\frac{\left(d_{\bmu_i}^{(m)}\right)^2}{\left(d_{\bSigma_i}^{(m)}\right)^2}\right)}{\sqrt{\pi}\, d_{\bSigma_i}^{(m)}}\bSigma_i^{(m)}\vb{w} - \frac{y_i}{2}\!\left[\mathrm{erf}\!\left(\frac{d_{\bmu_i}^{(m)}}{d_{\bSigma_i}^{(m)}}\right) + 1\right]\bmu_i^{(m)}.
+\end{equation}
+By linearity of differentiation applied to \cref{eq:gmu_objective}:
+\begin{equation}
+    \pdv{\obj_{\text{GMU}}}{\vb{w}} = \lambda\vb{w} + \frac{1}{n}\sum_{i=1}^{n}\sum_{m=1}^{M_i}\pi_i^{(m)}\,\pdv{{\loss_{\text{GSU}}}_{i}^{(m)}}{\vb{w}}.
+\end{equation}
+Substituting:
+\begin{equation}\label{eq:gmu_grad_w}
+    \boxed{\;\pdv{\obj_{\text{GMU}}}{\vb{w}} = \lambda \vb{w}
+    + \frac{1}{n}\sum_{i=1}^{n}\sum_{m=1}^{M_i} \pi_i^{(m)} \left[\frac{\exp\!\left(-\frac{\left(d_{\bmu_i}^{(m)}\right)^2}{\left(d_{\bSigma_i}^{(m)}\right)^2}\right)}{\sqrt{\pi}\, d_{\bSigma_i}^{(m)}}\, \bSigma_i^{(m)} \vb{w} \;-\; \frac{y_i}{2}\left(\mathrm{erf}\!\left(\frac{d_{\bmu_i}^{(m)}}{d_{\bSigma_i}^{(m)}}\right) + 1\right) \bmu_i^{(m)}\right].\;}
+\end{equation}
+
+\subsection{Derivation of the Gradient with Respect to $b$}
+
+Similarly, the per-component bias gradient is
+\begin{equation}
+    \pdv{{\loss_{\text{GSU}}}_{i}^{(m)}}{b} = -\frac{y_i}{2}\!\left[\mathrm{erf}\!\left(\frac{d_{\bmu_i}^{(m)}}{d_{\bSigma_i}^{(m)}}\right) + 1\right].
+\end{equation}
+Summing:
+\begin{equation}\label{eq:gmu_grad_b}
+    \boxed{\;\pdv{\obj_{\text{GMU}}}{b} = -\frac{1}{n}\sum_{i=1}^{n}\sum_{m=1}^{M_i} \pi_i^{(m)}\, \frac{y_i}{2}\left[\mathrm{erf}\!\left(\frac{d_{\bmu_i}^{(m)}}{d_{\bSigma_i}^{(m)}}\right) + 1\right].\;}
+\end{equation}
+
+\begin{remark}[Sanity check]
+Compare \cref{eq:gmu_grad_w} with the SVM-GSU gradient \cref{eq:gsu_grad_w}. The structure is identical; each term inside the brackets has the same form, but now there is an additional weighted sum over components $m$. If $M_i = 1$ and $\pi_i^{(1)} = 1$, the extra sum collapses to a single term and we recover the SVM-GSU gradient exactly.
+\end{remark}
+
+\section{Convexity of the SVM-GMU Objective}\label{sec:gmu_convexity}
+
+\begin{proposition}
+$\obj_{\text{GMU}}(\vb{w}, b)$ is strongly convex with respect to $(\vb{w}, b)$.
+\end{proposition}
+
+\begin{proof}
+By \cref{prop:gsu_convex} and the reasoning in its proof, each per-component loss ${\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b)$ is convex in $(\vb{w}, b)$. Since $\pi_i^{(m)} \geq 0$, the mixture loss
+\begin{equation}
+    {\loss_{\text{GMU}}}_{i}(\vb{w}, b) = \sum_{m=1}^{M_i}\pi_i^{(m)}\,{\loss_{\text{GSU}}}_{i}^{(m)}(\vb{w}, b)
+\end{equation}
+is a non-negative weighted sum of convex functions, hence convex. The average over training examples is therefore also convex. Adding the strongly convex regularizer $\frac{\lambda}{2}\|\vb{w}\|^2$ yields a strongly convex objective with a unique global minimum.
+\end{proof}
+
+\section{The SGD Algorithm for SVM-GMU}\label{sec:gmu_sgd}
+
+The Pegasos-style SGD extends directly from \cref{alg:sgd_gsu}. The only structural change is that gradient computation now sums over $M_i$ components per example using \cref{eq:gmu_grad_w,eq:gmu_grad_b}. Per-example cost is $\mathcal{O}(M_i \cdot d)$ with diagonal covariances, compared to $\mathcal{O}(d)$ for SVM-GSU. The full algorithm is given in \cref{alg:sgd_gmu}.
+
+\begin{algorithm}[H]
+\caption{Stochastic sub-gradient descent for SVM-GMU.}
+\label{alg:sgd_gmu}
+\begin{algorithmic}[1]
+\Require Training set $\setX''$ of GMM-annotated examples, regularization parameter $\lambda > 0$, number of iterations $T \in \mathbb{N}$, mini-batch size $k \in \mathbb{N}$.
+\Ensure Learned parameters $\vb{w}^{(T+1)}$, $b^{(T+1)}$.
+\State Initialize $b^{(1)} \gets 0$ and $\vb{w}^{(1)}$ such that $\|\vb{w}^{(1)}\| \leq \nicefrac{1}{\sqrt{\lambda}}$.
+\For{$t = 1, 2, \ldots, T$}
+    \State Sample a random mini-batch $\setX_t \subseteq \setX''$ with $|\setX_t| = k$.
+    \State Set learning rate $\eta_t \gets \nicefrac{1}{\lambda t}$.
+    \State Initialize gradient accumulators $\vb{g}_{\vb{w}} \gets \vb{0}$, $g_b \gets 0$.
+    \For{each example $i$ in $\setX_t$}
+        \For{each component $m = 1, \ldots, M_i$}
+            \State Compute $d_{\bmu_i}^{(m)}$ and $d_{\bSigma_i}^{(m)}$ using \cref{eq:dmu_m,eq:dsigma_m}.
+            \State Accumulate $\vb{g}_{\vb{w}} \gets \vb{g}_{\vb{w}} + \pi_i^{(m)}\cdot (\text{per-component contribution from \cref{eq:gmu_grad_w}})$.
+            \State Accumulate $g_b \gets g_b + \pi_i^{(m)}\cdot (\text{per-component contribution from \cref{eq:gmu_grad_b}})$.
+        \EndFor
+    \EndFor
+    \State Add regularizer gradient: $\vb{g}_{\vb{w}} \gets \vb{g}_{\vb{w}} + \lambda \vb{w}^{(t)}$.
+    \State $\vb{w}^{(t+1)} \gets \vb{w}^{(t)} - \eta_t\, \vb{g}_{\vb{w}}$ \Comment{Gradient step on $\vb{w}$}
+    \State $\vb{w}^{(t+1)} \gets \min\!\left(1,\; \frac{1}{\sqrt{\lambda}\,\|\vb{w}^{(t+1)}\|}\right) \vb{w}^{(t+1)}$ \Comment{Project onto $\|\vb{w}\| \leq \nicefrac{1}{\sqrt{\lambda}}$}
+    \State $b^{(t+1)} \gets b^{(t)} - \eta_t\, g_b$ \Comment{Gradient step on $b$}
+\EndFor
+\State \Return $\vb{w}^{(T+1)}$, $b^{(T+1)}$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Limiting and Special Cases}\label{sec:gmu_special}
+
+\begin{itemize}[leftmargin=2em]
+    \item $M_i = 1$ for all $i$: recovers SVM-GSU.
+    \item $M_i = 1$ and $\bSigma_i \to \vb{0}$: recovers standard SVM.
+    \item Shared means ($\bmu_i^{(m)} = \bmu_i$ for all $m$): models heavier-than-Gaussian tails via a scale mixture.
+    \item Isotropic components ($\bSigma_i^{(m)} = (\sigma_i^{(m)})^2 \vb{I}$): $d_{\bSigma_i}^{(m)} = \sqrt{2}\, \sigma_i^{(m)} \|\vb{w}\|$.
+\end{itemize}
+
+\section{Extension to Linear Subspace Learning}\label{sec:gmu_subspace}
+
+Two strategies:
+\begin{enumerate}
+    \item per-component subspaces via eigendecomposition of each $\bSigma_i^{(m)}$, or
+    \item a shared subspace per example.
+\end{enumerate}
+For strategy (2), we can use the weighted mean covariance $\bar{\bSigma}_i = \sum_m \pi_i^{(m)} \bSigma_i^{(m)}$, or the full mixture covariance given by the \emph{law of total covariance}:
+\begin{equation}\label{eq:mixture_cov}
+    \text{Cov}(\vb{x}_i) = \bar{\bSigma}_i + \sum_{m=1}^{M_i} \pi_i^{(m)}\left(\bmu_i^{(m)} - \bar{\bmu}_i\right)\!\left(\bmu_i^{(m)} - \bar{\bmu}_i\right)^{\intercal}, \qquad \bar{\bmu}_i = \sum_m \pi_i^{(m)} \bmu_i^{(m)}.
+\end{equation}
+The first term captures the average within-component variance; the second captures the variance of the means. This is the correct covariance of a random vector drawn from the GMM.
+
+\section{Summary Table}
+
+\begin{table}[H]
+\centering
+\caption{Comparison of the standard SVM, SVM-GSU, and the proposed SVM-GMU.}
+\label{tab:comparison}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Property} & \textbf{Standard SVM} & \textbf{SVM-GSU} & \textbf{SVM-GMU} \\
+\midrule
+Uncertainty model & None (point) & Gaussian & Gaussian mixture \\
+Uncertainty shape & --- & Ellipsoidal & Arbitrary \\
+Multimodal & --- & No & Yes \\
+Components per example & --- & 1 & $M_i \geq 1$ \\
+Closed-form loss & Yes & Yes & Yes \\
+Closed-form gradients & Yes & Yes & Yes \\
+Convex objective & Yes & Yes & Yes \\
+SGD applicable & Yes & Yes & Yes \\
+Per-example cost (diagonal $\bSigma$) & $\mathcal{O}(d)$ & $\mathcal{O}(d)$ & $\mathcal{O}(M_i \cdot d)$ \\
+Degenerates to standard SVM & N/A & Yes ($\bSigma_i \to \vb{0}$) & Yes ($M_i\!=\!1$, $\bSigma_i \to \vb{0}$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion and Open Questions}\label{sec:discussion}
+
+\subsection{How to Obtain the GMM Parameters in Practice?}
+
+The GMM parameters $\left\{\pi_i^{(m)}, \bmu_i^{(m)}, \bSigma_i^{(m)}\right\}$ can be obtained from domain knowledge, by fitting a GMM to multiple measurements via the EM algorithm, from data augmentation, or from generative models with mixture posteriors.
+
+\subsection{Choosing the Number of Components $M_i$}
+
+Standard model selection criteria (BIC, AIC, cross-validation) apply. Even $M_i = 2$ or $3$ dramatically increases expressiveness.
+
+\subsection{Potential for Kernelization}
+
+Kernelization remains open: the closed-form loss depends on $\vb{w}^{\intercal} \bSigma_i^{(m)} \vb{w}$, which does not directly map to a kernel formulation.
+
+\subsection{Relationship to Other Non-Gaussian Uncertainty Models}
+
+Alternatives include sampling-based methods (scale poorly), robust optimization (more conservative), and other distributional families. GMMs offer the best flexibility due to their universal approximation property while preserving all computational advantages.
+
+% =====================================================================
+% APPENDICES
+% =====================================================================
+\appendix
+
+\part*{Appendices}
+\addcontentsline{toc}{part}{Appendices}
+
+\section{Full Proof of \cref{thm:halfspace}}\label{app:proof}
+
+We give a complete proof. The goal is to evaluate
+\begin{equation}
+    I^+(\vb{a}, b') = \int_{\Omega^+}(\vb{a}^{\intercal}\vb{x} + b')\, f_{\vb{x}}(\vb{x})\,\dd{\vb{x}},
+\end{equation}
+where $\Omega^+ = \{\vb{x} \in \R^d : \vb{a}^{\intercal}\vb{x} + b' \geq 0\}$ and $\vb{x} \sim \Norm(\bmu, \bSigma)$. The case $I^-$ follows by a symmetric argument.
+
+We proceed by a sequence of four changes of variables, each bringing the integral closer to a standard form.
+
+\subsection{Step 1: Translation to Center the Gaussian}
+
+Let $\vb{y} = \vb{x} - \bmu$, so $\vb{x} = \vb{y} + \bmu$ and $\dd{\vb{x}} = \dd{\vb{y}}$. The Gaussian becomes
+\begin{equation}
+    f_{\vb{x}}(\vb{y} + \bmu) = \frac{1}{(2\pi)^{d/2}\, |\bSigma|^{1/2}} \exp\!\left(-\frac{1}{2}\vb{y}^{\intercal}\bSigma^{-1}\vb{y}\right),
+\end{equation}
+which is the density of $\Norm(\vb{0}, \bSigma)$. The integrand becomes
+\begin{equation}
+    \vb{a}^{\intercal}(\vb{y} + \bmu) + b' = \vb{a}^{\intercal}\vb{y} + \underbrace{(\vb{a}^{\intercal}\bmu + b')}_{d_{\bmu}} = \vb{a}^{\intercal}\vb{y} + d_{\bmu}.
+\end{equation}
+The halfspace transforms to
+\begin{equation}
+    \Omega^+_1 = \{\vb{y} \in \R^d : \vb{a}^{\intercal}\vb{y} + d_{\bmu} \geq 0\}.
+\end{equation}
+So
+\begin{equation}
+    I^+ = \frac{1}{(2\pi)^{d/2}\, |\bSigma|^{1/2}} \int_{\Omega^+_1} (\vb{a}^{\intercal}\vb{y} + d_{\bmu}) \exp\!\left(-\frac{1}{2}\vb{y}^{\intercal}\bSigma^{-1}\vb{y}\right) \dd{\vb{y}}.
+\end{equation}
+
+\subsection{Step 2: Diagonalize the Covariance}
+
+Since $\bSigma \in \mathbb{S}^d_{++}$, it has an orthonormal eigendecomposition:
+\begin{equation}
+    \bSigma = \vb{U}\vb{D}\vb{U}^{\intercal},
+\end{equation}
+where $\vb{U}$ is orthogonal ($\vb{U}^{\intercal}\vb{U} = \vb{I}$, so $|\det(\vb{U})| = 1$) and $\vb{D}$ is diagonal with positive entries (the eigenvalues of $\bSigma$). Let $\vb{z} = \vb{U}^{\intercal}\vb{y}$, so $\vb{y} = \vb{U}\vb{z}$ and $\dd{\vb{y}} = |\det(\vb{U})|\dd{\vb{z}} = \dd{\vb{z}}$.
+
+Define $\vb{a}_1 = \vb{U}^{\intercal}\vb{a}$. Then
+\begin{equation}
+    \vb{a}^{\intercal}\vb{y} = \vb{a}^{\intercal}\vb{U}\vb{z} = (\vb{U}^{\intercal}\vb{a})^{\intercal}\vb{z} = \vb{a}_1^{\intercal}\vb{z},
+\end{equation}
+and
+\begin{equation}
+    \vb{y}^{\intercal}\bSigma^{-1}\vb{y} = \vb{z}^{\intercal}\vb{U}^{\intercal}(\vb{U}\vb{D}\vb{U}^{\intercal})^{-1}\vb{U}\vb{z} = \vb{z}^{\intercal}\vb{U}^{\intercal}\vb{U}\vb{D}^{-1}\vb{U}^{\intercal}\vb{U}\vb{z} = \vb{z}^{\intercal}\vb{D}^{-1}\vb{z}.
+\end{equation}
+Also $|\bSigma|^{1/2} = |\vb{D}|^{1/2}$. The integral becomes
+\begin{equation}
+    I^+ = \frac{1}{(2\pi)^{d/2}\, |\vb{D}|^{1/2}} \int_{\Omega^+_2} (\vb{a}_1^{\intercal}\vb{z} + d_{\bmu}) \exp\!\left(-\frac{1}{2}\vb{z}^{\intercal}\vb{D}^{-1}\vb{z}\right) \dd{\vb{z}},
+\end{equation}
+where $\Omega^+_2 = \{\vb{z} : \vb{a}_1^{\intercal}\vb{z} + d_{\bmu} \geq 0\}$.
+
+\subsection{Step 3: Rescale to Standardize}
+
+Let $\vb{v} = \vb{D}^{-1/2}\vb{z}$, so $\vb{z} = \vb{D}^{1/2}\vb{v}$ and $\dd{\vb{z}} = |\vb{D}|^{1/2}\dd{\vb{v}}$. Define $\vb{a}_2 = \vb{D}^{1/2}\vb{a}_1$. Then
+\begin{equation}
+    \vb{a}_1^{\intercal}\vb{z} = \vb{a}_1^{\intercal}\vb{D}^{1/2}\vb{v} = (\vb{D}^{1/2}\vb{a}_1)^{\intercal}\vb{v} = \vb{a}_2^{\intercal}\vb{v},
+\end{equation}
+and
+\begin{equation}
+    \vb{z}^{\intercal}\vb{D}^{-1}\vb{z} = \vb{v}^{\intercal}\vb{D}^{1/2}\vb{D}^{-1}\vb{D}^{1/2}\vb{v} = \vb{v}^{\intercal}\vb{v}.
+\end{equation}
+The factors $|\vb{D}|^{1/2}$ cancel, yielding
+\begin{equation}\label{eq:after_rescale}
+    I^+ = \frac{1}{(2\pi)^{d/2}} \int_{\Omega^+_3} (\vb{a}_2^{\intercal}\vb{v} + d_{\bmu}) \exp\!\left(-\frac{1}{2}\|\vb{v}\|^2\right) \dd{\vb{v}},
+\end{equation}
+where $\Omega^+_3 = \{\vb{v} : \vb{a}_2^{\intercal}\vb{v} + d_{\bmu} \geq 0\}$.
+
+Note that
+\begin{equation}
+    \|\vb{a}_2\|^2 = \vb{a}_2^{\intercal}\vb{a}_2 = \vb{a}_1^{\intercal}\vb{D}\vb{a}_1 = \vb{a}^{\intercal}\vb{U}\vb{D}\vb{U}^{\intercal}\vb{a} = \vb{a}^{\intercal}\bSigma\vb{a},
+\end{equation}
+so $\|\vb{a}_2\| = \sqrt{\vb{a}^{\intercal}\bSigma\vb{a}}$. Recall from \cref{eq:d_sigma} that $d_{\bSigma} = \sqrt{2\vb{a}^{\intercal}\bSigma\vb{a}} = \sqrt{2}\|\vb{a}_2\|$.
+
+\subsection{Step 4: Rotation to Isolate One Coordinate}
+
+Now we have a standard Gaussian (with identity covariance) and a linear function times it. Pick an orthogonal matrix $\vb{B}$ such that
+\begin{equation}
+    \vb{B}\vb{a}_2 = \|\vb{a}_2\|\vb{e}_d,
+\end{equation}
+where $\vb{e}_d = (0, 0, \ldots, 0, 1)^{\intercal}$ is the $d$-th standard basis vector. Such a $\vb{B}$ exists (for example, a Householder reflection).
+
+Let $\vb{m} = \vb{B}\vb{v}$, so $\vb{v} = \vb{B}^{\intercal}\vb{m}$ and $\dd{\vb{v}} = \dd{\vb{m}}$. Then
+\begin{equation}
+    \vb{a}_2^{\intercal}\vb{v} = \vb{a}_2^{\intercal}\vb{B}^{\intercal}\vb{m} = (\vb{B}\vb{a}_2)^{\intercal}\vb{m} = \|\vb{a}_2\|\vb{e}_d^{\intercal}\vb{m} = \|\vb{a}_2\|\,m_d,
+\end{equation}
+and
+\begin{equation}
+    \|\vb{v}\|^2 = \vb{v}^{\intercal}\vb{v} = \vb{m}^{\intercal}\vb{B}\vb{B}^{\intercal}\vb{m} = \vb{m}^{\intercal}\vb{m} = \|\vb{m}\|^2.
+\end{equation}
+The halfspace becomes $\Omega^+_4 = \{\vb{m} : \|\vb{a}_2\|m_d + d_{\bmu} \geq 0\}$, equivalently $m_d \geq -d_{\bmu}/\|\vb{a}_2\|$.
+
+So \cref{eq:after_rescale} becomes
+\begin{equation}
+    I^+ = \frac{1}{(2\pi)^{d/2}} \int_{\R^{d-1}} \! \int_{-d_{\bmu}/\|\vb{a}_2\|}^{\infty} (\|\vb{a}_2\|m_d + d_{\bmu}) \exp\!\left(-\frac{1}{2}\|\vb{m}\|^2\right) \dd{m_d}\,\dd{m_1}\cdots\dd{m_{d-1}}.
+\end{equation}
+
+\subsection{Step 5: Separate and Evaluate the 1D Integral}
+
+Write $\|\vb{m}\|^2 = m_d^2 + \sum_{j=1}^{d-1}m_j^2$. The integrand factors and the $m_1, \ldots, m_{d-1}$ integrals each give $\sqrt{2\pi}$ (they are integrals of a standard Gaussian over all of $\R$):
+\begin{equation}
+    \int_{\R^{d-1}}\exp\!\left(-\frac{1}{2}\sum_{j=1}^{d-1}m_j^2\right)\prod_{j=1}^{d-1}\dd{m_j} = (2\pi)^{(d-1)/2}.
+\end{equation}
+So
+\begin{equation}
+    I^+ = \frac{(2\pi)^{(d-1)/2}}{(2\pi)^{d/2}} \int_{c}^{\infty}(\|\vb{a}_2\|t + d_{\bmu})\exp\!\left(-\frac{t^2}{2}\right)\dd{t} = \frac{1}{\sqrt{2\pi}}\int_c^{\infty}(\|\vb{a}_2\|t + d_{\bmu})\exp\!\left(-\frac{t^2}{2}\right)\dd{t},
+\end{equation}
+where $c = -d_{\bmu}/\|\vb{a}_2\|$. We split this into two 1D integrals:
+\begin{equation}
+    I^+ = \frac{\|\vb{a}_2\|}{\sqrt{2\pi}}\underbrace{\int_c^{\infty}t\,e^{-t^2/2}\,\dd{t}}_{T_1} + \frac{d_{\bmu}}{\sqrt{2\pi}}\underbrace{\int_c^{\infty}e^{-t^2/2}\,\dd{t}}_{T_2}.
+\end{equation}
+
+\paragraph{Evaluating $T_1$.} Since $\dv{t}\left(-e^{-t^2/2}\right) = t\,e^{-t^2/2}$:
+\begin{equation}
+    T_1 = \left[-e^{-t^2/2}\right]_c^{\infty} = 0 - \left(-e^{-c^2/2}\right) = e^{-c^2/2}.
+\end{equation}
+
+\paragraph{Evaluating $T_2$.} Using the substitution $u = t/\sqrt{2}$, $\dd{t} = \sqrt{2}\dd{u}$:
+\begin{equation}
+    T_2 = \int_c^{\infty}e^{-t^2/2}\,\dd{t} = \sqrt{2}\int_{c/\sqrt{2}}^{\infty}e^{-u^2}\,\dd{u}.
+\end{equation}
+Now we express this in terms of the error function. From \cref{eq:erf_def}, $\int_0^x e^{-u^2}\dd{u} = \frac{\sqrt{\pi}}{2}\mathrm{erf}(x)$, and $\int_0^{\infty}e^{-u^2}\dd{u} = \frac{\sqrt{\pi}}{2}$. Therefore
+\begin{equation}
+    \int_{c/\sqrt{2}}^{\infty}e^{-u^2}\dd{u} = \int_0^{\infty}e^{-u^2}\dd{u} - \int_0^{c/\sqrt{2}}e^{-u^2}\dd{u} = \frac{\sqrt{\pi}}{2} - \frac{\sqrt{\pi}}{2}\mathrm{erf}\!\left(\frac{c}{\sqrt{2}}\right) = \frac{\sqrt{\pi}}{2}\!\left(1 - \mathrm{erf}\!\left(\frac{c}{\sqrt{2}}\right)\right).
+\end{equation}
+So
+\begin{equation}
+    T_2 = \sqrt{2}\cdot\frac{\sqrt{\pi}}{2}\!\left(1 - \mathrm{erf}\!\left(\frac{c}{\sqrt{2}}\right)\right) = \sqrt{\frac{\pi}{2}}\!\left(1 - \mathrm{erf}\!\left(\frac{c}{\sqrt{2}}\right)\right).
+\end{equation}
+
+\subsection{Step 6: Combine and Simplify}
+
+Putting it together:
+\begin{equation}
+    I^+ = \frac{\|\vb{a}_2\|}{\sqrt{2\pi}}e^{-c^2/2} + \frac{d_{\bmu}}{\sqrt{2\pi}}\cdot\sqrt{\frac{\pi}{2}}\!\left(1 - \mathrm{erf}\!\left(\frac{c}{\sqrt{2}}\right)\right).
+\end{equation}
+Simplify the second term: $\frac{1}{\sqrt{2\pi}}\cdot\sqrt{\frac{\pi}{2}} = \frac{1}{2}$. So
+\begin{equation}
+    I^+ = \frac{\|\vb{a}_2\|}{\sqrt{2\pi}}e^{-c^2/2} + \frac{d_{\bmu}}{2}\!\left(1 - \mathrm{erf}\!\left(\frac{c}{\sqrt{2}}\right)\right).
+\end{equation}
+Now substitute back. Recall $c = -d_{\bmu}/\|\vb{a}_2\|$, and $\|\vb{a}_2\| = d_{\bSigma}/\sqrt{2}$, so $c = -\sqrt{2}\,d_{\bmu}/d_{\bSigma}$, and
+\begin{equation}
+    \frac{c}{\sqrt{2}} = -\frac{d_{\bmu}}{d_{\bSigma}}, \qquad \frac{c^2}{2} = \frac{d_{\bmu}^2}{d_{\bSigma}^2}.
+\end{equation}
+Using the oddness of erf, $\mathrm{erf}(-x) = -\mathrm{erf}(x)$:
+\begin{equation}
+    1 - \mathrm{erf}\!\left(-\frac{d_{\bmu}}{d_{\bSigma}}\right) = 1 + \mathrm{erf}\!\left(\frac{d_{\bmu}}{d_{\bSigma}}\right).
+\end{equation}
+Also
+\begin{equation}
+    \frac{\|\vb{a}_2\|}{\sqrt{2\pi}} = \frac{d_{\bSigma}/\sqrt{2}}{\sqrt{2\pi}} = \frac{d_{\bSigma}}{2\sqrt{\pi}}.
+\end{equation}
+Therefore
+\begin{equation}
+    I^+ = \frac{d_{\bmu}}{2}\!\left(1 + \mathrm{erf}\!\left(\frac{d_{\bmu}}{d_{\bSigma}}\right)\right) + \frac{d_{\bSigma}}{2\sqrt{\pi}}\exp\!\left(-\frac{d_{\bmu}^2}{d_{\bSigma}^2}\right).
+\end{equation}
+This is exactly \cref{eq:halfspace_integral} with the $+$ sign. The $I^-$ case follows by repeating the argument with the halfspace $\vb{a}^{\intercal}\vb{x} + b' \leq 0$; equivalently, one can use the identity $I^+ + I^- = \E[\vb{a}^{\intercal}\vb{x} + b'] = d_{\bmu}$ to recover $I^-$. \qed
+
+\pagebreak
+\printbibliography
+
+\end{document}
