@@ -242,7 +242,7 @@ class SvmGmu(BaseEstimator, ClassifierMixin):
         2. For t = 1, ..., T:
            a. Sample a mini-batch of indices.
            b. Set learning rate eta_t = 1 / (lam * t).
-           c. Compute gradients using Eqs. 49-50.
+           c. Compute gradients using Eqs. 70 and 72.
            d. Update w and b.
            e. Project w so that ||w|| <= 1/sqrt(lam).
 
@@ -284,7 +284,7 @@ class SvmGmu(BaseEstimator, ClassifierMixin):
             # (b) Learning rate: eta_t = 1 / (lam * t)
             eta = 1.0 / (self.lam * t)
 
-            # (c) Compute gradients (Eqs. 49-50)
+            # (c) Compute gradients (Eqs. 70 and 72)
             grad_w, grad_b = gmu_gradients(
                 w, b, sample_uncertainty, y, self.lam, batch_idx
             )

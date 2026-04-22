@@ -218,7 +218,7 @@ def build_default_uncertainty(
     so the math code can uniformly assume uncertainty data is present.
     Each sample gets a single component with weight 1, mean equal to the
     row of X, and a zero diagonal covariance.  This makes the loss reduce
-    to the standard hinge loss (Section 3.6 of the paper).
+    to the standard hinge loss (Section 9.7 of the report).
 
     Parameters
     ----------
