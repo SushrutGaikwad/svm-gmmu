@@ -73,7 +73,7 @@
 \title{\textbf{From SVMs to Uncertainty-Aware Classification:\\A Detailed Treatment of Gaussian and Gaussian Mixture Sample Uncertainty}}
 
 \author{Sushrut Gaikwad}
-\date{March 29, 2026}
+\date{April 20, 2026}
 \maketitle
 
 \begin{abstract}
@@ -296,9 +296,9 @@ We will need the following standard fact. If $\vb{x} \sim \Norm(\bmu, \bSigma)$ 
 \begin{equation}
     \vb{a}^{\intercal}\vb{x} \sim \Norm\!\left(\vb{a}^{\intercal}\bmu,\; \vb{a}^{\intercal}\bSigma\vb{a}\right).
 \end{equation}
-\emph{Proof.} The mean is $\E[\vb{a}^{\intercal}\vb{x}] = \vb{a}^{\intercal}\E[\vb{x}] = \vb{a}^{\intercal}\bmu$. The variance is
+\emph{Proof.} The mean is $\E\left[\vb{a}^{\intercal}\vb{x}\right] = \vb{a}^{\intercal}\E[\vb{x}] = \vb{a}^{\intercal}\bmu$. The variance is
 \begin{equation}
-    \text{Var}(\vb{a}^{\intercal}\vb{x}) = \E[(\vb{a}^{\intercal}\vb{x} - \vb{a}^{\intercal}\bmu)^2] = \E[\vb{a}^{\intercal}(\vb{x}-\bmu)(\vb{x}-\bmu)^{\intercal}\vb{a}] = \vb{a}^{\intercal}\bSigma\vb{a}.
+    \text{Var}\left(\vb{a}^{\intercal}\vb{x}\right) = \E\left[(\vb{a}^{\intercal}\vb{x} - \vb{a}^{\intercal}\bmu)^2\right] = \E\left[\vb{a}^{\intercal}(\vb{x}-\bmu)(\vb{x}-\bmu)^{\intercal}\vb{a}\right] = \vb{a}^{\intercal}\bSigma\vb{a}.
 \end{equation}
 Gaussianity is preserved under linear transformations (a well-known property of the Gaussian family).
 
@@ -363,7 +363,7 @@ The paper proves (in Appendix A) the following key result. We state it here, and
 \begin{theorem}[Gaussian-Weighted Linear Integral Over a Halfspace]\label{thm:halfspace}
 Let $\vb{x} \in \R^d$ be a random vector with $\vb{x} \sim \Norm(\bmu, \bSigma)$. Let $H$ be the hyperplane $\vb{a}^{\intercal} \vb{x} + b' = 0$, which divides $\R^d$ into two halfspaces,
 \begin{equation}
-    \Omega^{\pm} = \{\vb{x} \in \R^d : \vb{a}^{\intercal} \vb{x} + b' \gtrless 0\}.
+    \Omega^{\pm} = \left\{\vb{x} \in \R^d : \vb{a}^{\intercal} \vb{x} + b' \gtrless 0\right\}.
 \end{equation}
 Then the integrals
 \begin{equation}\label{eq:halfspace_integral_def}
@@ -411,7 +411,7 @@ To apply \cref{thm:halfspace} to our loss function \cref{eq:loss_halfspace}, we 
 \begin{equation}
     y_i(\vb{w}^{\intercal}\vb{x} + b) \leq 1 \iff y_i \vb{w}^{\intercal}\vb{x} + y_i b - 1 \leq 0 \iff -y_i\vb{w}^{\intercal}\vb{x} + (1 - y_i b) \geq 0.
 \end{equation}
-The integrand is $[1 - y_i(\vb{w}^{\intercal} \vb{x} + b)]$, which equals $(-y_i \vb{w})^{\intercal} \vb{x} + (1 - y_i b)$. Comparing with the theorem's integrand $\vb{a}^{\intercal} \vb{x} + b'$ over the halfspace $\Omega^+ = \{\vb{x}: \vb{a}^{\intercal}\vb{x} + b' \geq 0\}$, we identify:
+The integrand is $[1 - y_i(\vb{w}^{\intercal} \vb{x} + b)]$, which equals $(-y_i \vb{w})^{\intercal} \vb{x} + (1 - y_i b)$. Comparing with the theorem's integrand $\vb{a}^{\intercal} \vb{x} + b'$ over the halfspace $\Omega^+ = \left\{\vb{x}: \vb{a}^{\intercal}\vb{x} + b' \geq 0\right\}$, we identify:
 \begin{equation}
     \vb{a} = -y_i \vb{w}, \qquad b' = 1 - y_i b.
 \end{equation}

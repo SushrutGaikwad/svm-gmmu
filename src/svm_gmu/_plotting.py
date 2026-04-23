@@ -249,8 +249,33 @@ def _draw_boundary(
     xlim: tuple[float, float],
     ylim: tuple[float, float],
     grid_resolution: int,
+    *,
+    color: str = "k",
+    linewidth: float = 2.0,
+    linestyle: str = "-",
+    show_margins: bool = True,
+    margin_linestyle: str = "dashed",
+    margin_alpha: float = 0.5,
 ) -> None:
-    """Draw the decision boundary (solid) and ±1 margins (dashed)."""
+    """Draw the decision boundary (solid) and optionally the +/-1 margins.
+
+    Parameters
+    ----------
+    ax, model, xlim, ylim, grid_resolution
+        See calling code.
+    color : str, default="k"
+        Color of the decision boundary (and margins, if shown).
+    linewidth : float, default=2.0
+        Line width of the decision boundary.
+    linestyle : str, default="-"
+        Line style of the decision boundary (e.g. ``"-"``, ``"--"``).
+    show_margins : bool, default=True
+        Whether to draw the +/-1 margin lines.
+    margin_linestyle : str, default="dashed"
+        Line style for the margin lines when shown.
+    margin_alpha : float, default=0.5
+        Alpha for the margin lines.
+    """
     x1_grid = np.linspace(xlim[0], xlim[1], grid_resolution)
     x2_grid = np.linspace(ylim[0], ylim[1], grid_resolution)
     X1, X2 = np.meshgrid(x1_grid, x2_grid)
@@ -258,17 +283,26 @@ def _draw_boundary(
 
     Z = model.decision_function(grid_pts).reshape(X1.shape)
 
-    ax.contour(X1, X2, Z, levels=[0], colors=["k"], linewidths=2.0)
     ax.contour(
         X1,
         X2,
         Z,
-        levels=[-1, 1],
-        colors=["k"],
-        linewidths=1.0,
-        linestyles="dashed",
-        alpha=0.5,
+        levels=[0],
+        colors=[color],
+        linewidths=linewidth,
+        linestyles=linestyle,
     )
+    if show_margins:
+        ax.contour(
+            X1,
+            X2,
+            Z,
+            levels=[-1, 1],
+            colors=[color],
+            linewidths=max(1.0, linewidth - 1.0),
+            linestyles=margin_linestyle,
+            alpha=margin_alpha,
+        )
 
 
 def _add_legend(
@@ -286,6 +320,61 @@ def _add_legend(
         handles.append(
             Line2D(
                 [0], [0], color="k", lw=1, ls="--", alpha=0.5, label=r"Margin ($\pm 1$)"
+            )
+        )
+
+    sigma_str = ", ".join(f"${s}\\sigma$" for s in sorted(sigmas))
+    handles.append(
+        Line2D([0], [0], color="gray", lw=0.8, label=f"Contours at {sigma_str}")
+    )
+    ax.legend(handles=handles, loc="best", fontsize=9, framealpha=0.9)
+
+
+def _add_comparison_legend(
+    ax: Axes,
+    *,
+    sigmas: tuple[int, ...],
+    gmu_color: str,
+    svm_color: str,
+    show_gmu_margins: bool,
+    show_svm_margins: bool,
+) -> None:
+    """Build the legend for the overlaid SVM-GMU vs. Standard SVM plot.
+
+    The legend always contains: the two class markers, the two decision
+    boundaries, and the sigma-level contour entry.  Margin entries are
+    added only for the models whose margins are being shown.
+    """
+    from matplotlib.lines import Line2D
+
+    handles, _ = ax.get_legend_handles_labels()
+
+    handles.append(Line2D([0], [0], color=gmu_color, lw=2.2, ls="-", label="SVM-GMU"))
+    handles.append(
+        Line2D([0], [0], color=svm_color, lw=2.0, ls="--", label="Standard SVM")
+    )
+    if show_gmu_margins:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=gmu_color,
+                lw=1.2,
+                ls="dashed",
+                alpha=0.55,
+                label=r"SVM-GMU margin ($\pm 1$)",
+            )
+        )
+    if show_svm_margins:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=svm_color,
+                lw=1.2,
+                ls="dotted",
+                alpha=0.6,
+                label=r"Standard SVM margin ($\pm 1$)",
             )
         )
 
@@ -529,21 +618,20 @@ def plot_boundary_comparison(
     sigmas: tuple[int, ...] = _DEFAULT_SIGMAS,
     grid_resolution: int = _DEFAULT_GRID_RES,
     point_size: float = 90,
-    figsize: tuple[float, float] = (16, 8),
-    titles: tuple[str, str] = (
-        "SVM-GMU (with uncertainty)",
-        "Standard SVM (no uncertainty)",
-    ),
-    suptitle: str = "Decision Boundary Comparison: SVM-GMU vs Standard SVM",
+    figsize: tuple[float, float] = (10, 10),
+    title: str = "SVM-GMU vs. Standard SVM",
+    show_margins: str = "none",
     random_state: int | None = 0,
-) -> tuple[Figure, tuple[Axes, Axes]]:
-    """Side-by-side comparison of two fitted models on the same dataset.
+    ax: Axes | None = None,
+) -> tuple[Figure, Axes]:
+    """Overlay two fitted models' decision boundaries on a single plot.
 
-    The left panel shows the *model_gmu* boundary and the right panel
-    shows the *model_svm* boundary, both overlaid on the same GMM
-    density contours and observed points.  This is useful for seeing
-    how uncertainty-aware training shifts the decision boundary compared
-    to a standard (point-mass) SVM.
+    Both boundaries are drawn on the same axes over the GMM density
+    contours and observed points, so the user can see at a glance how
+    uncertainty-aware training shifts the boundary relative to a
+    standard (point-mass) SVM.  The SVM-GMU boundary is drawn in solid
+    black (the "main" model) and the standard SVM boundary in dashed
+    dark orange.
 
     Parameters
     ----------
@@ -563,26 +651,37 @@ def plot_boundary_comparison(
         Grid points per axis for density evaluation.
     point_size : float, default=90
         Marker size for the observed points.
-    figsize : tuple of float, default=(16, 8)
-        Figure size in inches.
-    titles : tuple of str, default=("SVM-GMU (with uncertainty)", ...)
-        Titles for the left and right panels.
-    suptitle : str
-        Figure-level title.
+    figsize : tuple of float, default=(10, 10)
+        Figure size in inches (ignored when *ax* is provided).
+    title : str, default="SVM-GMU vs. Standard SVM"
+        Axes title.
+    show_margins : {"none", "gmu", "svm", "both"}, default="none"
+        Which model's +/-1 margin lines to display:
+
+        - ``"none"``: no margin lines (default, least cluttered).
+        - ``"gmu"``: only the SVM-GMU margins.
+        - ``"svm"``: only the Standard SVM margins.
+        - ``"both"``: margins for both models.
+
+        SVM-GMU margins are drawn dashed in the boundary color; Standard
+        SVM margins are drawn dotted in the boundary color, so both
+        stand out distinctly when displayed together.
     random_state : int or None, default=0
         Seed for the Monte Carlo sigma-level estimation.
+    ax : matplotlib Axes or None, default=None
+        If provided, draw on this axes instead of creating a new figure.
 
     Returns
     -------
     fig : Figure
         The matplotlib figure.
-    (ax_left, ax_right) : tuple of Axes
-        The two subplot axes.
+    ax : Axes
+        The axes containing the overlaid comparison.
 
     Raises
     ------
     ValueError
-        If the data is not 2-D.
+        If the data is not 2-D, or if *show_margins* has an invalid value.
     ImportError
         If matplotlib is not installed.
 
@@ -596,7 +695,7 @@ def plot_boundary_comparison(
     >>> model_svm = SvmGmu(lam=0.01, max_iter=5000, random_state=42)
     >>> model_svm.fit(X, y)
     SvmGmu(lam=0.01, max_iter=5000, random_state=42)
-    >>> fig, (ax_l, ax_r) = plot_boundary_comparison(
+    >>> fig, ax = plot_boundary_comparison(
     ...     X, y, sample_uncertainty, model_gmu, model_svm,
     ... )
     """
@@ -609,42 +708,81 @@ def plot_boundary_comparison(
     y = np.asarray(y, dtype=np.float64).ravel()
     _check_2d(X, sample_uncertainty)
 
-    fig, axes = plt.subplots(
-        1,
-        2,
-        figsize=figsize,
-        sharex=True,
-        sharey=True,
-        gridspec_kw={"wspace": 0.05},
-    )
-    ax_left, ax_right = axes
+    valid_margin_opts = {"none", "gmu", "svm", "both"}
+    if show_margins not in valid_margin_opts:
+        raise ValueError(
+            f"show_margins must be one of {sorted(valid_margin_opts)}, "
+            f"got {show_margins!r}."
+        )
+
+    rng = np.random.default_rng(random_state)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.get_figure()
+
+    # -- GMM density contours (drawn once, shared by both boundaries) --
+    for i in range(len(X)):
+        _draw_contours(
+            ax,
+            sample_uncertainty[i],
+            _CLASS_COLORS[int(y[i])],
+            sigmas,
+            grid_resolution,
+            rng,
+        )
 
     xlim, ylim = _auto_limits(sample_uncertainty)
 
-    for ax, model, panel_title, is_left in [
-        (ax_left, model_gmu, titles[0], True),
-        (ax_right, model_svm, titles[1], False),
-    ]:
-        # Use a fresh RNG seeded identically so both panels get the
-        # same sigma-level thresholds for identical contour lines.
-        rng = np.random.default_rng(random_state)
+    # -- Boundary styles ----------------------------------------------
+    # SVM-GMU = main model: solid black, slightly thicker.
+    # Standard SVM = comparison: dashed dark orange.
+    gmu_color = "#000000"
+    svm_color = "#d97706"  # dark orange
 
-        for i in range(len(X)):
-            _draw_contours(
-                ax,
-                sample_uncertainty[i],
-                _CLASS_COLORS[int(y[i])],
-                sigmas,
-                grid_resolution,
-                rng,
-            )
+    show_gmu_margins = show_margins in ("gmu", "both")
+    show_svm_margins = show_margins in ("svm", "both")
 
-        _draw_boundary(ax, model, xlim, ylim, grid_resolution)
-        _draw_points(ax, X, y, point_size)
-        _add_legend(ax, sigmas, include_boundary=True)
-        _style_ax(ax, panel_title, show_ylabel=is_left)
+    _draw_boundary(
+        ax,
+        model_gmu,
+        xlim,
+        ylim,
+        grid_resolution,
+        color=gmu_color,
+        linewidth=2.2,
+        linestyle="-",
+        show_margins=show_gmu_margins,
+        margin_linestyle="dashed",
+        margin_alpha=0.55,
+    )
+    _draw_boundary(
+        ax,
+        model_svm,
+        xlim,
+        ylim,
+        grid_resolution,
+        color=svm_color,
+        linewidth=2.0,
+        linestyle="--",
+        show_margins=show_svm_margins,
+        margin_linestyle="dotted",
+        margin_alpha=0.6,
+    )
 
-    fig.suptitle(suptitle, fontsize=15, fontweight="bold")
-    fig.subplots_adjust(wspace=0.08)
+    # -- Observed points ----------------------------------------------
+    _draw_points(ax, X, y, point_size)
 
-    return fig, (ax_left, ax_right)
+    # -- Legend and styling -------------------------------------------
+    _add_comparison_legend(
+        ax,
+        sigmas=sigmas,
+        gmu_color=gmu_color,
+        svm_color=svm_color,
+        show_gmu_margins=show_gmu_margins,
+        show_svm_margins=show_svm_margins,
+    )
+    _style_ax(ax, title)
+
+    return fig, ax
